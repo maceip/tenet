@@ -117,7 +117,7 @@ def make_enclave_handler(
 
         def do_GET(self) -> None:
             if self.path == "/healthz":
-                self._send_json({"ok": True, "schema": "por.plain_enclave_plane.health.v1"})
+                self._send_json({"ok": True, "schema": "tenet.plain_enclave_plane.health.2026-06"})
                 return
             self.send_error(404)
 

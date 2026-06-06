@@ -1,8 +1,8 @@
 # tenet
 
 tenet is an expert network: ask a question once, route it to the person or
-agent whose knowledge best matches it, and return an answer over a private
-mixnet path. The product direction is a human-scale mixture of experts where
+agent whose knowledge best matches it, and return an answer over sealed
+transport. The product direction is a human-scale mixture of experts where
 useful expertise can be discovered, reached, and eventually compensated; this
 repository currently implements the routing, attestation, reachability, and CLI
 runtime foundations for that network. Payments and payouts are not implemented
@@ -11,6 +11,17 @@ in the current runtime.
 > **Current live status, queue, pins, and operations:** [`STATUS.md`](STATUS.md)
 > is the source of truth. Archived design docs live under
 > `~/fat/tenet-archive/docs/`.
+
+## Protocol Invariants
+
+- All nodes are clients.
+- Clients advertise substrate capabilities, not routeable expertise.
+- DHT discovers substrate and signed opaque/control records.
+- Matcher discovers expertise behind a privacy boundary.
+- Handles connect matching to routing.
+- Only handles route traffic.
+- Routing chooses among reachable capabilities.
+- REACH/relay is one capability, not the center.
 
 ## Why It Exists
 
@@ -29,9 +40,13 @@ market where useful answers can be rewarded.
 
 - **Ask once.** `tenet ask` submits a prompt to the live network.
 - **Match privately.** The attested matcher selects candidate experts from
-  manifests baked into the Nitro enclave workload.
+  manifests baked into the Nitro enclave workload. Signed cached matcher
+  results may be gossiped and reused so the TEE is an authority, not a
+  throughput bottleneck. Project/root signatures still bootstrap software,
+  trust-policy, and update authority.
 - **Route sealed traffic.** The question travels through the mixnet and
-  reachability relay; relays forward bytes without reading them.
+  reachability relay substrate; relays forward bytes without reading them. This
+  is sealed transport today, not a standalone anonymity guarantee.
 - **Answer from local knowledge.** The selected expert opens the request,
   combines local context with a model, and streams the answer back.
 - **Compensation later.** Payout UI and ledger integration are deliberately
@@ -95,7 +110,9 @@ python3 -m tenet enclave send --prompt "What is impressionism in painting?"
 ```
 
 Experts publish a manifest, register reachability through the relay when behind
-NAT, and answer matching questions through the same `tenet` binary.
+NAT, and answer matching questions through the same `tenet` binary. Public
+control/DHT state carries substrate capabilities and signed opaque records; it
+must not advertise routeable expertise directly.
 
 ## Project Layout
 

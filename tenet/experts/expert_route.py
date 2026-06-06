@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from tenet.handles import is_opaque_handle
 from tenet.experts.memory_index import COVER_MARKER, MemoryManifest, score_manifest
 
 
@@ -40,6 +41,14 @@ class PeerObservation:
 class PeerCandidate:
     manifest: MemoryManifest
     observation: PeerObservation | None = None
+    route_handle: str | None = None
+    publisher_id: str | None = None
+
+    @property
+    def peer_id(self) -> str:
+        """Compatibility alias: route-facing code must use route_handle."""
+
+        return self.route_handle or self.manifest.peer_id
 
 
 @dataclass(frozen=True)
@@ -60,7 +69,7 @@ class RouteIntent:
 
 @dataclass(frozen=True)
 class CandidateScore:
-    peer_id: str
+    route_handle: str
     total_score: float
     memory_score: float
     operational_score: float
@@ -68,6 +77,13 @@ class CandidateScore:
     p50_latency_ms: float
     price_units: float
     reasons: tuple[str, ...]
+    publisher_id: str | None = None
+
+    @property
+    def peer_id(self) -> str:
+        """Compatibility alias for callers not yet renamed to route_handle."""
+
+        return self.route_handle
 
 
 @dataclass(frozen=True)
@@ -90,10 +106,16 @@ class CandidatePool:
 @dataclass(frozen=True)
 class ExpertRoutePlan:
     use_expert: bool
-    selected_peer_id: str | None
+    selected_handle: str | None
     fallback_provider: str
     pool: CandidatePool
     reason: str
+
+    @property
+    def selected_peer_id(self) -> str | None:
+        """Compatibility alias for one schema transition."""
+
+        return self.selected_handle
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), sort_keys=True, indent=2)
@@ -140,7 +162,7 @@ def plan_expert_route(
         reason=_pool_reason(pool_tier),
     )
     selected = _weighted_choice(scored, intent.random_seed)
-    return ExpertRoutePlan(True, selected.peer_id, intent.fallback_provider, pool, pool.reason)
+    return ExpertRoutePlan(True, selected.route_handle, intent.fallback_provider, pool, pool.reason)
 
 
 def _score_candidates(
@@ -151,6 +173,9 @@ def _score_candidates(
     scored = []
 
     for candidate in candidates:
+        route_handle = _candidate_route_handle(candidate)
+        if route_handle is None:
+            continue
         # Cover (decoy) candidates pad the matcher response to a constant size to
         # hide the real-match count from the oblivious operator (item 6). They are
         # never routing targets, so drop them before scoring. The operator could
@@ -180,7 +205,7 @@ def _score_candidates(
         )
         scored.append(
             CandidateScore(
-                peer_id=candidate.manifest.peer_id,
+                route_handle=route_handle,
                 total_score=total,
                 memory_score=memory,
                 operational_score=operational,
@@ -188,11 +213,22 @@ def _score_candidates(
                 p50_latency_ms=observation.p50_latency_ms,
                 price_units=price,
                 reasons=reasons,
+                publisher_id=candidate.publisher_id or candidate.manifest.peer_id,
             )
         )
 
-    scored.sort(key=lambda item: (-item.total_score, item.peer_id))
+    scored.sort(key=lambda item: (-item.total_score, item.route_handle))
     return scored
+
+
+def _candidate_route_handle(candidate: PeerCandidate) -> str | None:
+    if candidate.route_handle and is_opaque_handle(candidate.route_handle):
+        return candidate.route_handle
+    # Transition support for already handle-rekeyed matcher output. Raw manifest
+    # peer ids are deliberately not routeable unless they are handle-shaped.
+    if is_opaque_handle(candidate.manifest.peer_id):
+        return candidate.manifest.peer_id
+    return None
 
 
 def _operational_score(observation: PeerObservation) -> float:

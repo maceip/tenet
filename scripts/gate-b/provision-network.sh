@@ -64,7 +64,7 @@ from pathlib import Path
 experts = json.loads('''$EXPERT_JSON''')
 out = Path("$OUT")
 out.write_text(json.dumps({
-  "version": "por.gate_b_topology.v1",
+  "version": "tenet.gate_b_topology.2026-06",
   "roles": {
     "reach_relay": {
       "host": "$RELAY_HOST",

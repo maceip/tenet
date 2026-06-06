@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-JOIN_PACK_SCHEMA = "por.join_pack.v1"
+from tenet.mixnet.control.bootstrap import ControlBootstrap
+from tenet.schema import supports_schema
+
+JOIN_PACK_SCHEMA = "tenet.join_pack.2026-06"
 DEFAULT_JOIN_PACK_PATHS = (
     Path("config/join-pack.json"),
     Path("join-pack.json"),
@@ -30,6 +33,7 @@ class JoinPack:
     matcher: Mapping[str, object]
     reachability_relay: Mapping[str, object]
     directory: Mapping[str, object]
+    control_bootstrap: ControlBootstrap
     asker_mailbox_config: Path
     pack_path: Path
 
@@ -40,7 +44,7 @@ class JoinPack:
         if not isinstance(raw, dict):
             raise ValueError("join pack must be a JSON object")
         schema = str(raw.get("schema", ""))
-        if schema != JOIN_PACK_SCHEMA:
+        if not supports_schema(schema, JOIN_PACK_SCHEMA):
             raise ValueError(f"unsupported join pack schema: {schema!r}")
 
         matcher = raw.get("matcher")
@@ -55,6 +59,14 @@ class JoinPack:
         if not isinstance(directory, dict):
             raise TypeError("directory must be an object")
 
+        bootstrap_raw = raw.get("control_bootstrap")
+        if not isinstance(bootstrap_raw, dict):
+            raise ValueError("join pack control_bootstrap is required")
+        control_bootstrap = ControlBootstrap.from_dict(
+            bootstrap_raw,
+            source_path=pack_path,
+        )
+
         asker = raw.get("asker")
         if not isinstance(asker, dict):
             raise TypeError("asker must be an object")
@@ -67,9 +79,13 @@ class JoinPack:
             matcher=matcher,
             reachability_relay=relay,
             directory=directory,
+            control_bootstrap=control_bootstrap,
             asker_mailbox_config=mailbox_path,
             pack_path=pack_path,
         )
+
+    def to_control_service(self):
+        return self.control_bootstrap.to_control_service()
 
     def matcher_url(self) -> str:
         return str(self.matcher["url"]).rstrip("/")

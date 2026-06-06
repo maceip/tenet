@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import TextIO
 
 
-LOG_SCHEMA_VERSION = "por.log.v1"
+LOG_SCHEMA_VERSION = "tenet.log.2026-06"
 DEFAULT_REDACT_FIELDS = frozenset(
     {
         "api_key",

@@ -1,11 +1,11 @@
 {
-  "schema": "por.live_enclave.v1",
+  "schema": "tenet.live_enclave.2026-06",
   "description": "Pinned trust policy for the live Nitro matcher (Jun 2026 two-expert alpha path).",
   "url": "https://5faf834eac20.aeon.site/",
   "approved_value_x": [
     "5faf834eac20adaf931a8a7c18cb7a75630a5225322ee6caade2406e0f471299f2de48ade0d69804d1d4558883a5ef00"
   ],
-  "tls_spki_hash": "d5ef2ab186ec717791ea506da7be7d189a86e90078f09cc99038c3ba8daa8d96",
+  "tls_spki_hash": "3bce07ae78425e8495fe63e1dff8125b148557dde071aaf4d394797d6dd2439c",
   "require_spki_pin": true,
   "mailbox_datagram_delivery_enabled": true,
   "aw_bin": "aw",

@@ -2,7 +2,8 @@
 
 **The only living document for planning, design, status, and TODO.**
 
-Last re-verified: **2026-06-04** (live current-alpha `tenet ask`, LAN Windows/WSL clients, WSL client-sim container, platform binaries, relay packet-size root cause, optional mailbox attempt)
+Last live-network reverified: **2026-06-04** (live current-alpha `tenet ask`, LAN Windows/WSL clients, WSL client-sim container, platform binaries, relay packet-size root cause, optional mailbox attempt)
+Last code/docs containment update: **2026-06-06** (handle-only route guardrails, client capability invariant, selected-handle compatibility cleanup)
 
 Superseded markdown: `~/fat/tenet-archive/` — do not treat as current.
 
@@ -12,7 +13,7 @@ Superseded markdown: `~/fat/tenet-archive/` — do not treat as current.
 
 This file is the authority. Do not create new gates, phases, branch labels, or side runbooks. Use the queue IDs below.
 
-Current beta path: **one matcher-only Nitro TEE + one public REACH relay + two off-TEE EC2 experts + direct client relay send**.
+Current beta path: **one matcher-only Nitro TEE + one public REACH capability + two off-TEE EC2 experts + handle-routed sealed send**. The current live transport usually uses REACH, but the protocol rule is capability selection, not relay-centered routing.
 
 Legacy filenames containing `gate-b` are operational script names only. Do not add new `gate-*` or `phase-*` concepts unless replacing those filenames with item-numbered names.
 
@@ -50,7 +51,9 @@ Pytest is not live-network proof. The only accepted runtime proof for item **13*
 
 **Engineering shortcuts (item 9 only, not product):** in-TEE stub relay/expert in `deploy/run_matcher_live.py`, stub `tenet enclave send` reply, `./scripts/demo-mailbox-e2e.sh`.
 
-**Current live path:** two-expert alpha matcher on Nitro, direct REACH relay send, `via_mailbox: false`.
+**Current live path:** two-expert alpha matcher on Nitro, handle-routed sealed send over the REACH capability, `via_mailbox: false`.
+
+**Identity/routing invariant:** public names such as `rust~tenet` describe intent or service namespace; durable client/peer IDs identify publishers; opaque handles are the only route targets. Runtime code now validates selected route targets through `tenet/protocol_invariants.py`, `PromptRequestEnvelope`, `tenet/experts/client.py`, REACH registration, and client capability advertisements. Compatibility JSON may still expose `selected_peer_id`, but current code also emits `selected_handle` and treats both as the same opaque handle during the transition.
 
 **Off critical path (no queue ID):** expert groups taxonomy (`tenet/experts/expert_groups.py`), Android (`android/`), ARC credentials.
 
@@ -81,7 +84,7 @@ env PATH=/Users/mac/.cargo/bin:$PATH python3 -m tenet ask \
   --timeout 60 --json
 ```
 
-Result at `2026-06-04T09:55Z`: `ok: true`, `selected_peer_id: h4a30b46453eb7bd`, real Claude response, `fallback_used: false`, `via_mailbox: false`.
+Result at `2026-06-04T09:55Z`: `ok: true`, selected handle `h4a30b46453eb7bd` (`selected_peer_id` compatibility key), real Claude response, `fallback_used: false`, `via_mailbox: false`.
 
 Last product asker smoke command:
 
@@ -92,7 +95,7 @@ env PATH=/Users/mac/.cargo/bin:$PATH dist/asker-bundle/ask \
   --timeout 120 --json
 ```
 
-Result at `2026-06-04T10:07Z`: `ok: true`, `fallback_used: false`, `selected_peer_id: h4a30b46453eb7bd`, real Claude response, `via_mailbox: false`.
+Result at `2026-06-04T10:07Z`: `ok: true`, `fallback_used: false`, selected handle `h4a30b46453eb7bd` (`selected_peer_id` compatibility key), real Claude response, `via_mailbox: false`.
 
 **Root cause fixed (2026-06-04T20:00Z):** the live relay/expert processes were still configured for `payload_size: 2048`, while local client configs had drifted to `1200`. The relay log showed `opaque_forward_drop bytes=1479`, so the request was never forwarded to the expert. Aligning `config/live-mailbox-client.json`, `config/live-reach-relay.json`, templates, and matcher build defaults to `2048` restored native macOS and WSL sends.
 
@@ -102,7 +105,7 @@ Result at `2026-06-04T10:07Z`: `ok: true`, `fallback_used: false`, `selected_pee
 
 **Client simulation image (2026-06-04):** WSL Docker on `mac@192.168.0.180` rebuilt `tenet-client-sim:latest` from the corrected `dist/tenet-linux-x86_64` and `2048` live config. `REBUILD=1 PROMPT=Monet POR_TIMEOUT=120 ./scripts/run-client-sim-wsl.sh` returned `ok: true`, `fallback_used: false`, real Claude text, selected `h4a30b46453eb7bd`, `via_mailbox: false`. Mac Docker/Orb still times out with `no_done`; relay logs at `2026-06-04T19:59Z` show repeated `opaque_forward_return bytes=2048` to `95.91.240.5:18793`, so that remaining failure is Docker/Orb UDP return delivery, not relay/expert/matcher.
 
-`via_mailbox: false` is correct for the current matcher-only live path: the TEE returns the handle/peer route and the client sends directly through the REACH relay. `python3 -m tenet ask --via-mailbox ...` was attempted on `2026-06-04` and failed with `TimeoutError ... (no_done)`. Leave it off unless `/v1/deliver` UDP return delivery is deliberately fixed and the EIF is redeployed.
+`via_mailbox: false` is correct for the current matcher-only live path: the TEE returns an opaque handle plus private route material and the client sends over the chosen reachability capability, currently REACH. `python3 -m tenet ask --via-mailbox ...` was attempted on `2026-06-04` and failed with `TimeoutError ... (no_done)`. Leave it off unless `/v1/deliver` UDP return delivery is deliberately fixed and the EIF is redeployed.
 
 **Do not cite pytest as proof the live network works.**
 
@@ -177,8 +180,8 @@ Synthetic seeds (`alpha-seed-*`) only pad node count when there are fewer sessio
 └────▲───────────────────────▲──────────────────────────│─────────┘
      │ query                 │ handles                     │ sealed
 ┌────┴─────┐                                    ┌──────────────────┐
-│  ASKER   │◀───────────────────────────────────│ REACHABILITY     │
-│  laptop  │── sealed via handle ────────────────▶│ relay (public)   │
+│  CLIENT  │◀───────────────────────────────────│ REACHABILITY     │
+│  laptop  │── sealed via handle ────────────────▶│ capability       │
 └────▲─────┘                                    └─────────┬────────┘
      │ answer                                              │ sealed
      └────────────────────────────────────────────  ┌───────────┐
@@ -199,9 +202,9 @@ Code: `tenet/edges/cli/expert.py`, `tenet/mixnet/reach_client.py`, `tenet/edges/
 | Decision |
 |----------|
 | Single client binary (`python3 -m tenet`) |
-| Single trust model: oblivious TEE matcher/mailbox |
+| Hybrid trust model: clients share one codebase; TEE execution raises trust for private matching/mailbox/policy |
 | Lossy match OK; frontier model is correctness floor |
-| Opaque embeddings only on disk/wire/directory |
+| Opaque handles only for route targets; public/DHT layers must not expose routeable expertise |
 | Wire-then-harden: HTTP stand-ins → attestation → SPKI → oblivious → TEE |
 
 ---

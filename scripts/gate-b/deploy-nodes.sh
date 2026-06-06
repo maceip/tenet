@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-# Legacy path name. Deploy real tenet clients to each node in gate-b-topology.json.
+# Gate-b live deployment (EC2/Nitro).
+#
+# LEGACY / OUTDATED relative to the modern architecture:
+# - The unified WireNodeRuntime + real Kademlia control overlay (DHT for signed
+#   control records), capabilities (control_dht etc.), and the flexible simulator
+#   live in sim/ + deploy/Dockerfile.node.
+# - This script rsyncs the tree and launches via `python3 -m tenet run` on remote
+#   instances (still works for the current live beta/gate-b paths).
+#
+# For containerized or realistic simulated fleets (all-local-docker, 2-laptop
+# mixed, cloud-only, cloud+local, cloud+mixed-local) with netem, restart
+# contracts, and the real control plane, use the new sim/ framework.
+#
+# This file is retained for the specific gate-b live provisioning flow.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -26,7 +39,13 @@ ssh -i "$RELAY_KEY" "ec2-user@${RELAY_HOST}" bash -s <<'REMOTE'
 set -euo pipefail
 cd ~/sphinx-tahoe
 python3 -m pip install --user -q dilithium-py pynacl cryptography 2>/dev/null || true
+# Align with modern pyproject/uv packaging for the core (Kademlia etc.).
+python3 -m pip install --user -q uv || true
+~/.local/bin/uv pip install --system -e . 2>/dev/null || python3 -m pip install --user -e . || true
 pkill -f live-reach-relay.json 2>/dev/null || true
+# Modern packaging step for the relay side as well (see pyproject.toml).
+python3 -m pip install --user -q uv || true
+~/.local/bin/uv pip install --system -e . 2>/dev/null || python3 -m pip install --user -e . || true
 setsid python3 -m tenet run --config config/live-reach-relay.json --node-id reach-beta-1 \
   >> ~/reach-relay.log 2>&1 < /dev/null &
 disown
@@ -118,7 +137,12 @@ for index, node in enumerate(experts_nodes):
     remote = f"""set -euo pipefail
 cd ~/sphinx-tahoe
 sudo apt-get update -qq && sudo apt-get install -y -qq python3 python3-pip
-python3 -m pip install --user -q dilithium-py pynacl cryptography
+python3 -m pip install --user -q dilithium-py pynacl cryptography || true
+# Modern packaging: prefer uv (from pyproject.toml) so the installed tenet
+# package matches the current source + dependencies (including kademlia for
+# the real control DHT when nodes declare the control_dht capability).
+python3 -m pip install --user -q uv || true
+~/.local/bin/uv pip install --system -e . 2>/dev/null || python3 -m pip install --user -e . || true
 pkill -f expert-ec2.json 2>/dev/null || true
 python3 -c "
 from pathlib import Path

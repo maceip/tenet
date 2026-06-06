@@ -8,7 +8,7 @@
 # Then in another terminal:
 #   curl -s http://127.0.0.1:9384/healthz
 #   curl -s -X POST http://127.0.0.1:9384/v1/match -H 'Content-Type: application/json' \
-#     -d '{"mode":"por.plain_matcher.v1","max_records":4,"intent":{"prompt":"monet painting","requested_expertise":null,"random_seed":null}}'
+#     -d '{"mode":"tenet.plain_matcher.2026-06","max_records":4,"intent":{"prompt":"monet painting","requested_expertise":null,"random_seed":null}}'
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

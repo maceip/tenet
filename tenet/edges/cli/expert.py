@@ -8,6 +8,7 @@ from tenet.config import ClusterConfig, DaemonConfig, PorConfig
 from tenet.log_events import PorLogEvent, emit_log_event
 from tenet.mixnet.node_runtime import WireNodeRuntime
 from tenet.llm.provider import make_reply_handler
+from tenet.protocol_invariants import ProtocolInvariantError, require_route_handle
 
 
 def run_expert(*, config_path: str, node_id: str) -> int:
@@ -71,7 +72,10 @@ def _start_reach_registration(daemon: DaemonConfig):
 
     from tenet.mixnet.reach_client import ReachHeartbeatThread, ReachRelayEndpoint, register_with_relay
 
-    peer_id = reg.peer_id or daemon.node_id
+    try:
+        peer_id = require_route_handle(reg.peer_id, field="reach_registration.peer_id")
+    except ProtocolInvariantError as exc:
+        raise ValueError("reach_registration.peer_id must be an opaque route handle") from exc
     relay = ReachRelayEndpoint(reg.relay_host, reg.relay_port)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2.0)

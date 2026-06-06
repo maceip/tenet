@@ -16,9 +16,10 @@ from tenet.enclave.enclave_attest import (
 from tenet.experts.match_workload import PlainEnclavePlaneHttpClient
 from tenet.experts.expert_route import RouteIntent
 from tenet.experts.matcher import PLAIN_MATCHER_V1
+from tenet.schema import supports_schema
 
 
-LIVE_ENCLAVE_SCHEMA = "por.live_enclave.v1"
+LIVE_ENCLAVE_SCHEMA = "tenet.live_enclave.2026-06"
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "live-enclave.json"
 
 
@@ -36,7 +37,7 @@ class LiveEnclaveConfig:
     @classmethod
     def from_dict(cls, raw: Mapping[str, object]) -> "LiveEnclaveConfig":
         schema = str(raw.get("schema", ""))
-        if schema and schema != LIVE_ENCLAVE_SCHEMA:
+        if schema and not supports_schema(schema, LIVE_ENCLAVE_SCHEMA):
             raise ValueError(f"unsupported live enclave config schema: {schema!r}")
         url = str(raw.get("url", "")).rstrip("/")
         if not url.startswith("https://"):
@@ -141,7 +142,8 @@ def match_live_enclave(
         "candidate_count": len(result.candidates),
         "candidates": [
             {
-                "peer_id": candidate.manifest.peer_id,
+                "handle": candidate.route_handle or candidate.manifest.peer_id,
+                "publisher_id": candidate.publisher_id,
             }
             for candidate in result.candidates
         ],

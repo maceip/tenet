@@ -1,0 +1,68 @@
+# Cloud-only skeleton (Mode 3).
+#
+# All nodes live on cloud VM(s). You can model "multi-region" either by:
+# - Multiple cloud sites, each with its own ssh target (different VMs or regions).
+# - Or a single cloud site + logical sub-sites + netem (cheap way to simulate
+#   geography without many VMs).
+#
+# For true multi-cloud (AWS us-east + GCP eu-west, etc.):
+# - Stand up small VMs with Docker + your SSH key.
+# - (Optional but nice) Put them on a shared VPN mesh for UDP.
+# - Fill external_host with the reachable IP (public or VPN) for each site.
+# - Declare realistic latencies in the links section.
+#
+# The exact same logical nodes + workloads from the other scenarios can be
+# reused; only the site definitions change.
+
+network_id: "sim-core-2026-06"
+
+mixnet:
+  payload_size: 2048
+  routing_size: 16
+  max_hops: 5
+
+sites:
+  cloud-us:
+    runner: ssh-docker
+    ssh: "ubuntu@ec2-203-0-113-10.compute-1.amazonaws.com"
+    external_host: "203.0.113.10"
+  cloud-eu:
+    runner: ssh-docker
+    ssh: "ubuntu@203.0.113.50"
+    external_host: "203.0.113.50"
+
+links:
+  - from: cloud-us
+    to: cloud-eu
+    latency_ms: 65
+    loss_percent: 0.1
+    jitter_ms: 5
+
+# ... nodes and workloads identical to the other examples (or a larger fleet).
+nodes:
+  - id: dht-us-1
+    placement: cloud-us
+    capabilities: [control_dht, mixnode]
+  - id: dht-eu-1
+    placement: cloud-eu
+    capabilities: [control_dht, mixnode]
+  - id: relay-us-1
+    placement: cloud-us
+    capabilities: [mixnode]
+  - id: relay-eu-1
+    placement: cloud-eu
+    capabilities: [mixnode]
+  - id: expert-demo
+    placement: cloud-eu
+    capabilities: [expert, mixnode]
+    seeds:
+      pool: "pool~demo~tenet"
+
+workloads:
+  - name: basic-mixnet-roundtrip
+    type: mixnet_client
+    placement: cloud-us
+    target: "pool~demo~tenet"
+    count: 2
+    expect_success: true
+    timeout_s: 40.0

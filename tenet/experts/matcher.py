@@ -89,6 +89,8 @@ class PlainMatcher:
                     candidate=PeerCandidate(
                         _manifest_with_handle(record.manifest, opaque),
                         _observation_with_handle(record.observation, opaque),
+                        route_handle=opaque.token,
+                        publisher_id=record.peer_id,
                     ),
                 )
             )
@@ -215,7 +217,7 @@ class PlainMailbox:
 
     def to_json(self) -> str:
         data = {
-            "version": "por.plain_mailbox.v1",
+            "version": "tenet.plain_mailbox.2026-06",
             "handles": sorted(self._entries),
         }
         return json.dumps(data, sort_keys=True, indent=2)
@@ -251,8 +253,10 @@ class PlainMailboxDelivery:
 
     def relay_path_for_handle(self, handle: str) -> tuple[str, ...]:
         dial_target = self._dial_target(handle)
-        if dial_target.route_kind != ROUTE_RELAY or not dial_target.relay_id:
-            raise ValueError("mailbox delivery requires a reachability relay route")
+        if dial_target.route_kind != ROUTE_RELAY:
+            return tuple()
+        if not dial_target.relay_id:
+            raise ValueError("mailbox delivery requires a reachability assist route id")
         return (dial_target.relay_id,)
 
     def deliver_to_handle(
@@ -355,8 +359,12 @@ class PlainEnclavePlaneDiscoveryProvider:
                 raise ValueError("handle_unresolved")
             record = peer_address_record_from_dict(dict(resolution.peer_address))
             plan = build_dial_plan(record)
-            if plan.primary is None or plan.primary.kind != ROUTE_RELAY or not plan.primary.relay_id:
-                raise ValueError("mailbox_no_relay_path")
+            if plan.primary is None:
+                raise ValueError("mailbox_no_delivery_path")
+            if plan.primary.kind != ROUTE_RELAY:
+                return tuple()
+            if not plan.primary.relay_id:
+                raise ValueError("mailbox_no_reachability_assist_path")
             return (plan.primary.relay_id,)
         return self.delivery.relay_path_for_handle(handle)
 

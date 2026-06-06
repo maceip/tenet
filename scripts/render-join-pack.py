@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from nacl.signing import SigningKey
+
 ROOT = Path(__file__).resolve().parents[1]
-JOIN_PACK_SCHEMA = "por.join_pack.v1"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tenet.mixnet.control.bootstrap import BOOTSTRAP_SCHEMA, ControlBootstrap, TRUST_UPDATE_KEY
+from tenet.mixnet.control.records import (
+    ControlRecord,
+    RECORD_TYPE_TRUST_POINTER,
+    sign_control_record,
+)
+
+JOIN_PACK_SCHEMA = "tenet.join_pack.2026-06"
 
 
 def _relative_path(path: Path, base: Path) -> str:
@@ -17,6 +30,43 @@ def _relative_path(path: Path, base: Path) -> str:
         return str(path.resolve().relative_to(base.resolve()))
     except ValueError:
         return str(path)
+
+
+def _control_bootstrap(relay_id: str, value_x: str, tls_spki_hash: str) -> dict[str, object]:
+    signing_key_hex = os.environ.get("TENET_JOIN_PACK_SIGNING_KEY_HEX", "")
+    if not signing_key_hex:
+        raise SystemExit("TENET_JOIN_PACK_SIGNING_KEY_HEX is required to render join pack control_bootstrap")
+    signing_key = SigningKey(bytes.fromhex(signing_key_hex))
+    now = time.time()
+    ttl_seconds = float(os.environ.get("TENET_JOIN_PACK_TRUST_TTL_SECONDS", str(180 * 24 * 60 * 60)))
+    network_id = os.environ.get("TENET_CONTROL_NETWORK_ID", "default")
+    record = ControlRecord(
+        network_id=network_id,
+        key=TRUST_UPDATE_KEY,
+        record_type=RECORD_TYPE_TRUST_POINTER,
+        seq=int(now),
+        issued_at=now,
+        expires_at=now + ttl_seconds,
+        value={
+            "issuer": "join-pack-root",
+            "policy": "signed_control_records",
+            "matcher_attestation_ref": f"claim/matcher/value_x/{value_x[:16]}",
+            "matcher_tls_spki_hash": tls_spki_hash,
+            "bootstrap_relays": (relay_id,),
+        },
+    )
+    signed = sign_control_record(
+        record,
+        signing_key_hex=signing_key_hex,
+        key_id="join-pack-root",
+    )
+    return ControlBootstrap(
+        network_id=network_id,
+        update_roots={"join-pack-root": signing_key.verify_key.encode().hex()},
+        bootstrap_relays=(relay_id,),
+        records=(signed,),
+        schema=BOOTSTRAP_SCHEMA,
+    ).to_dict()
 
 
 def main() -> int:
@@ -51,7 +101,7 @@ def main() -> int:
         "schema": JOIN_PACK_SCHEMA,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "matcher": {
-            "schema": enclave.get("schema", "por.live_enclave.v1"),
+            "schema": enclave.get("schema", "tenet.live_enclave.2026-06"),
             "url": url + "/",
             "approved_value_x": enclave["approved_value_x"],
             "tls_spki_hash": enclave["tls_spki_hash"],
@@ -76,6 +126,7 @@ def main() -> int:
                 "over attested TLS."
             ),
         },
+        "control_bootstrap": _control_bootstrap(relay_id, value_x, enclave["tls_spki_hash"]),
         "asker": {
             "mailbox_config": _relative_path(mailbox_path, out_path.parent),
         },

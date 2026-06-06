@@ -1,13 +1,13 @@
 {
-  "schema": "por.join_pack.v1",
-  "generated_at": "2026-06-04T20:02:19Z",
+  "schema": "tenet.join_pack.2026-06",
+  "generated_at": "2026-06-06T14:34:40Z",
   "matcher": {
-    "schema": "por.live_enclave.v1",
+    "schema": "tenet.live_enclave.2026-06",
     "url": "https://5faf834eac20.aeon.site/",
     "approved_value_x": [
       "5faf834eac20adaf931a8a7c18cb7a75630a5225322ee6caade2406e0f471299f2de48ade0d69804d1d4558883a5ef00"
     ],
-    "tls_spki_hash": "d5ef2ab186ec717791ea506da7be7d189a86e90078f09cc99038c3ba8daa8d96",
+    "tls_spki_hash": "3bce07ae78425e8495fe63e1dff8125b148557dde071aaf4d394797d6dd2439c",
     "require_spki_pin": true,
     "aw_bin": "aw",
     "attested_workload_sha": "79a5ea2328f2b30192e57b53913355dcd5e0201e"
@@ -24,6 +24,47 @@
     "match_url": "https://5faf834eac20.aeon.site/v1/match",
     "deliver_url": "https://5faf834eac20.aeon.site/v1/deliver",
     "note": "Beta joiners do not fetch a separate public directory snapshot URL. Manifests are baked into the Nitro EIF; discovery is POST /v1/match over attested TLS."
+  },
+  "control_bootstrap": {
+    "schema": "tenet.bootstrap.2026-06",
+    "network_id": "default",
+    "update_roots": {
+      "join-pack-root": "fcd89ad52892d33770610c6555d299de8d6a19e41dba033b2f63cd2ecfe567ea"
+    },
+    "threshold": 1,
+    "bootstrap_relays": [
+      "reach-beta-1"
+    ],
+    "records": [
+      {
+        "schema": "tenet.mixnet.control.signed_record.2026-06",
+        "record": {
+          "network_id": "default",
+          "key": "trust/update/latest",
+          "record_type": "trust_pointer",
+          "seq": 1780756480,
+          "issued_at": 1780756480.121333,
+          "expires_at": 1796308480.121333,
+          "value": {
+            "issuer": "join-pack-root",
+            "policy": "signed_control_records",
+            "matcher_attestation_ref": "claim/matcher/value_x/5faf834eac20adaf",
+            "matcher_tls_spki_hash": "3bce07ae78425e8495fe63e1dff8125b148557dde071aaf4d394797d6dd2439c",
+            "bootstrap_relays": [
+              "reach-beta-1"
+            ]
+          },
+          "schema": "tenet.mixnet.control.record.2026-06"
+        },
+        "signatures": [
+          {
+            "key_id": "join-pack-root",
+            "alg": "ed25519",
+            "signature": "531f7740977f78af85ac86e8de74ed650840d7751aa14c019758ee850daa7612bec4cad6962996d3cb57a46245e550b4d1053aacdcbd662cc9ff16c125e6c607"
+          }
+        ]
+      }
+    ]
   },
   "asker": {
     "mailbox_config": "live-mailbox-client.json"

@@ -66,7 +66,7 @@ out = Path("$OUT")
 out.write_text(
     json.dumps(
         {
-            "version": "por.network_clients.v1",
+            "version": "tenet.network_clients.2026-06",
             "reach_relay_host": "$RELAY_HOST",
             "matcher_url": "$MATCHER_URL".rstrip("/") + "/",
             "clients": clients,

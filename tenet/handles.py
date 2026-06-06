@@ -8,10 +8,13 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Mapping
 
+from tenet.schema import normalize_schema, supports_schema
 
-OPAQUE_HANDLE_VERSION = "por.opaque_handle.v1"
-OPAQUE_HANDLE_RECORD_VERSION = "por.opaque_handle_record.v1"
+
+OPAQUE_HANDLE_VERSION = "tenet.opaque_handle.2026-06"
+OPAQUE_HANDLE_RECORD_VERSION = "tenet.opaque_handle_record.2026-06"
 OPAQUE_HANDLE_SIZE = 16
+OPAQUE_HANDLE_PREFIX = "h"
 DEFAULT_HANDLE_TTL_SECONDS = 270
 
 
@@ -33,6 +36,8 @@ class OpaqueHandle:
             raise ValueError("opaque handle token must be ASCII") from exc
         if len(raw) != OPAQUE_HANDLE_SIZE:
             raise ValueError("opaque handle token must be exactly 16 ASCII bytes")
+        if not self.token.startswith(OPAQUE_HANDLE_PREFIX):
+            raise ValueError("opaque handle token must start with 'h'")
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,13 @@ class OpaqueHandleRecord:
     issued_at: float
     expires_at: float
     signature: str
+
+    def __post_init__(self) -> None:
+        OpaqueHandle(self.handle)
+        if not self.mailbox_id:
+            raise ValueError("opaque handle record requires mailbox_id")
+        if self.expires_at <= self.issued_at:
+            raise ValueError("opaque handle record expires_at must be after issued_at")
 
     def is_expired(self, now: float | None = None) -> bool:
         return (time.time() if now is None else now) >= self.expires_at
@@ -80,7 +92,7 @@ class OpaqueHandleIssuer:
     def issue(self, *, peer_id: str, manifest_digest: str) -> OpaqueHandle:
         msg = f"{self.epoch}|{peer_id}|{manifest_digest}".encode("utf-8")
         digest = hmac.new(self.secret, msg, sha256).hexdigest()
-        return OpaqueHandle("h" + digest[: OPAQUE_HANDLE_SIZE - 1])
+        return OpaqueHandle(OPAQUE_HANDLE_PREFIX + digest[: OPAQUE_HANDLE_SIZE - 1])
 
     def record(
         self,
@@ -123,8 +135,9 @@ class OpaqueHandleIssuer:
 
 def opaque_handle_record_from_dict(raw: Mapping[str, object]) -> OpaqueHandleRecord:
     version = str(raw.get("version", ""))
-    if version != OPAQUE_HANDLE_RECORD_VERSION:
+    if not supports_schema(version, OPAQUE_HANDLE_RECORD_VERSION):
         raise ValueError(f"unsupported opaque handle record version: {version!r}")
+    version = normalize_schema(version, OPAQUE_HANDLE_RECORD_VERSION)
     return OpaqueHandleRecord(
         version=version,
         handle=str(raw.get("handle", "")),
@@ -133,6 +146,14 @@ def opaque_handle_record_from_dict(raw: Mapping[str, object]) -> OpaqueHandleRec
         expires_at=float(raw.get("expires_at", 0.0)),
         signature=str(raw.get("signature", "")),
     )
+
+
+def is_opaque_handle(value: object) -> bool:
+    try:
+        OpaqueHandle(str(value))
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _record_signature_payload(record: OpaqueHandleRecord) -> bytes:

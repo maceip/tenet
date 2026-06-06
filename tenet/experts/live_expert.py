@@ -39,6 +39,7 @@ def plan_live_expert(
         "ok": True,
         "url": config.url,
         "use_expert": prepared.use_expert,
+        "selected_handle": trace.selected_handle,
         "selected_peer_id": trace.selected_peer_id,
         "pool_tier": trace.pool_tier,
         "candidate_count": trace.candidate_count,

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Legacy directory name. Run network beta on real nodes:
-# provision → deploy → verify → asker clients.
+# Gate-b "run the whole live network" convenience wrapper.
+#
+# LEGACY: For modern simulation of the mixnet + real control DHT (Kademlia)
+# across multiple logical sites (with netem, capabilities, persistence, workloads),
+# see sim/ (sim/README.md) and deploy/Dockerfile.node.
+#
+# This script still drives the specific gate-b live (provision + deploy-nodes
+# + verify + optional load) flow against real EC2/Nitro instances.
 #
 # Usage:
 #   EXPERT_NODE_COUNT=3 ./scripts/gate-b/run-network.sh

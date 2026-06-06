@@ -28,6 +28,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
+from tenet.schema import normalize_schema
+
 
 # Marker key, set in a manifest's ``privacy`` map, that flags a candidate as a
 # cover (decoy) emitted for output-count hiding (item 6). It lives here, in the
@@ -36,7 +38,7 @@ from typing import Iterable, Iterator, Sequence
 COVER_MARKER = "cover"
 
 
-MANIFEST_VERSION = "por.memory_manifest.v1"
+MANIFEST_VERSION = "tenet.memory_manifest.2026-06"
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_'-]{2,}")
 DEFAULT_TEXT_EXTENSIONS = {
     ".txt",
@@ -199,7 +201,7 @@ class MemoryManifest:
     def from_json(cls, data: str) -> "MemoryManifest":
         raw = json.loads(data)
         return cls(
-            version=raw["version"],
+            version=normalize_schema(str(raw["version"]), MANIFEST_VERSION),
             peer_id=raw["peer_id"],
             created_at=raw["created_at"],
             roots=tuple(raw["roots"]),
@@ -310,22 +312,22 @@ def build_memory_index(config: IndexConfig) -> LocalMemoryIndex:
                 continue
 
             chunk_token_count = sum(terms.values())
-            chunk_hash = _hex_hash(b"por.chunk.text.v1", chunk_text.encode("utf-8"))
+            chunk_hash = _hex_hash(b"tenet.chunk.text.2026-06", chunk_text.encode("utf-8"))
             chunk_number = len(chunks)
             nonce = _hex_hash(
-                b"por.chunk.nonce.v1",
+                b"tenet.chunk.nonce.2026-06",
                 config.peer_id.encode("utf-8"),
                 source.encode("utf-8"),
                 str(start_token).encode("ascii"),
                 chunk_hash.encode("ascii"),
             )
             commitment = _hex_hash(
-                b"por.chunk.commitment.v1",
+                b"tenet.chunk.commitment.2026-06",
                 bytes.fromhex(nonce),
                 bytes.fromhex(chunk_hash),
             )
             chunk_id = _hex_hash(
-                b"por.chunk.id.v1",
+                b"tenet.chunk.id.2026-06",
                 config.peer_id.encode("utf-8"),
                 str(chunk_number).encode("ascii"),
                 commitment.encode("ascii"),
@@ -392,7 +394,7 @@ def score_manifest(manifest: MemoryManifest, query_text: str) -> float:
 
 def verify_chunk_proof(proof: ChunkProof) -> bool:
     commitment = _hex_hash(
-        b"por.chunk.commitment.v1",
+        b"tenet.chunk.commitment.2026-06",
         bytes.fromhex(proof.nonce),
         bytes.fromhex(proof.chunk_hash),
     )
@@ -456,7 +458,7 @@ def _stable_source(path: Path) -> str:
 
 def _root_id(root: str) -> str:
     resolved = str(Path(root).resolve()).encode("utf-8")
-    return _hex_hash(b"por.root.id.v1", resolved)[:24]
+    return _hex_hash(b"tenet.root.id.2026-06", resolved)[:24]
 
 
 def _chunk_text(text: str, chunk_tokens: int, overlap: int) -> Iterator[tuple[int, str]]:
@@ -512,12 +514,12 @@ def _hex_hash(*parts: bytes) -> str:
 
 
 def _hash_pair(left: bytes, right: bytes) -> bytes:
-    return sha256(b"por.merkle.node.v1" + left + right).digest()
+    return sha256(b"tenet.merkle.node.2026-06" + left + right).digest()
 
 
 def _merkle_root(commitments: Sequence[str]) -> str:
     if not commitments:
-        return _hex_hash(b"por.merkle.empty.v1")
+        return _hex_hash(b"tenet.merkle.empty.2026-06")
     level = [bytes.fromhex(commitment) for commitment in commitments]
     while len(level) > 1:
         if len(level) % 2 == 1:
@@ -545,7 +547,7 @@ def _merkle_proof(commitments: Sequence[str], index: int) -> tuple[tuple[str, st
 
 def _manifest_digest(manifest: MemoryManifest) -> str:
     data = asdict(replace(manifest, index_digest=""))
-    return _hex_hash(b"por.manifest.digest.v1", json.dumps(data, sort_keys=True).encode("utf-8"))
+    return _hex_hash(b"tenet.manifest.digest.2026-06", json.dumps(data, sort_keys=True).encode("utf-8"))
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

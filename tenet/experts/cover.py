@@ -59,7 +59,7 @@ def cover_candidate(
         peer_id=handle.token,
         privacy={**template.privacy, COVER_MARKER: True},
     )
-    return PeerCandidate(manifest, None)
+    return PeerCandidate(manifest, None, route_handle=handle.token)
 
 
 def is_cover(candidate: PeerCandidate) -> bool:

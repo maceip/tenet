@@ -25,6 +25,7 @@ from tenet.config import PeerAddressConfig, TrustedReachabilityRelayConfig
 from tenet.experts.directory import load_public_snapshot_directory
 from tenet.experts.match_workload import make_plain_enclave_plane_handler
 from tenet.handles import opaque_handle_record_from_dict
+from tenet.schema import supports_schema
 from tenet.experts.matcher import (
     PlainEnclavePlaneDiscoveryProvider,
     PlainMailbox,
@@ -35,7 +36,7 @@ from tenet.experts.matcher import (
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9384
-MAILBOX_FILE_VERSION = "por.enclave_mailbox_file.v1"
+MAILBOX_FILE_VERSION = "tenet.enclave_mailbox_file.2026-06"
 
 
 def serve_enclave_plane(
@@ -67,7 +68,7 @@ def build_provider_from_files(
     matcher = PlainMatcher.from_records(directory.records, handle_records, top_k=top_k)
 
     raw = json.loads(Path(mailbox).read_text(encoding="utf-8"))
-    if raw.get("version") != MAILBOX_FILE_VERSION:
+    if not supports_schema(str(raw.get("version", "")), MAILBOX_FILE_VERSION):
         raise ValueError(f"unsupported mailbox file version: {raw.get('version')!r}")
     box = PlainMailbox()
     for entry in raw.get("entries", ()):

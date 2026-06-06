@@ -26,7 +26,14 @@ def run_relay_cluster(daemon: DaemonConfig, por_config: PorConfig) -> int:
                    fields={"supernode_enabled": False})
     cluster = por_config.to_cluster_config()
     runtime = WireNodeRuntime(cluster, daemon.node_id, role="relay",
-                              logging=daemon.logging)
+                              logging=daemon.logging,
+                              control_store_path=daemon.control.store_path,
+                              control_bootstrap_path=daemon.control.bootstrap_path,
+                              control_verify_keys=daemon.control.verify_keys,
+                              control_threshold=daemon.control.threshold,
+                              control_anti_entropy_interval_seconds=daemon.control.anti_entropy_interval_seconds,
+                              control_sync_prefixes=daemon.control.sync_prefixes,
+                              control_replication_factor=daemon.control.replication_factor)
     return _serve_with_tls(runtime, daemon)
 
 

@@ -15,8 +15,10 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Sequence
 
+from tenet.schema import normalize_schema, supports_schema
 
-PEER_ADDRESS_RECORD_V1 = "por.peer_address_record.v1"
+
+PEER_ADDRESS_RECORD_V1 = "tenet.peer_address_record.2026-06"
 
 TRANSPORT_QUIC_DATAGRAM = "quic_datagram"
 TRANSPORT_WEBTRANSPORT = "webtransport"
@@ -382,8 +384,9 @@ def peer_address_record_from_dict(raw: dict[str, object]) -> PeerAddressRecord:
     """Parse a public peer address record from JSON/config data."""
 
     version = str(raw.get("version", ""))
-    if version != PEER_ADDRESS_RECORD_V1:
+    if not supports_schema(version, PEER_ADDRESS_RECORD_V1):
         raise ValueError(f"unsupported peer address record version: {version!r}")
+    version = normalize_schema(version, PEER_ADDRESS_RECORD_V1)
     relay_candidates = tuple(
         _relay_candidate_from_dict(item)
         for item in _object_sequence(raw.get("relay_candidates"))

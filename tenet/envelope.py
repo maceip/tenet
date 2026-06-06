@@ -13,8 +13,11 @@ from hashlib import sha256
 from typing import Sequence
 from uuid import uuid4
 
+from tenet.protocol_invariants import ProtocolInvariantError, require_route_handle
+from tenet.schema import normalize_schema, supports_schema
 
-APP_ENVELOPE_VERSION = "por.app.v1"
+
+APP_ENVELOPE_VERSION = "tenet.app.2026-06"
 VISIBLE_PROMPT_V1 = "visible_prompt_v1"
 CONFIDENTIAL_PROMPT_V1 = "confidential_prompt_v1"
 HYBRID_RETURN_PATH_V2 = "hybrid_return_path_v2"
@@ -31,7 +34,7 @@ def _default_streaming_return_descriptor() -> dict[str, object]:
 class PromptRequestEnvelope:
     version: str
     request_id: str
-    selected_peer_id: str | None
+    selected_handle: str | None
     mode: str
     provider_request: dict[str, object]
     intent_descriptor: dict[str, object]
@@ -45,7 +48,7 @@ class PromptRequestEnvelope:
     def visible_prompt(
         cls,
         prompt: str,
-        selected_peer_id: str | None,
+        selected_handle: str | None = None,
         requested_expertise: str | None = None,
         provider_request: dict[str, object] | None = None,
         return_descriptor: dict[str, object] | None = None,
@@ -54,7 +57,12 @@ class PromptRequestEnvelope:
         privacy_warnings: Sequence[str] = (),
         request_id: str | None = None,
         extra_intent: dict[str, object] | None = None,
+        selected_peer_id: str | None = None,
     ) -> "PromptRequestEnvelope":
+        if selected_peer_id is not None:
+            if selected_handle is not None and selected_handle != selected_peer_id:
+                raise ValueError("selected_handle and selected_peer_id disagree")
+            selected_handle = selected_peer_id
         intent = {
             "requested_expertise": requested_expertise,
             "prompt_sha256": sha256(prompt.encode("utf-8")).hexdigest(),
@@ -65,7 +73,7 @@ class PromptRequestEnvelope:
         return cls(
             version=APP_ENVELOPE_VERSION,
             request_id=request_id or uuid4().hex,
-            selected_peer_id=selected_peer_id,
+            selected_handle=selected_handle,
             mode=VISIBLE_PROMPT_V1,
             provider_request=provider_request or {"provider": "frontier", "stream": True},
             intent_descriptor=intent,
@@ -83,6 +91,7 @@ class PromptRequestEnvelope:
     def to_json(self) -> str:
         self.validate()
         raw = asdict(self)
+        raw["selected_peer_id"] = raw.pop("selected_handle")
         raw["intent_descriptor"] = {
             key: value
             for key, value in raw["intent_descriptor"].items()
@@ -106,9 +115,9 @@ class PromptRequestEnvelope:
             data = data.decode("utf-8")
         raw = json.loads(data)
         envelope = cls(
-            version=raw["version"],
+            version=normalize_schema(str(raw["version"]), APP_ENVELOPE_VERSION),
             request_id=raw["request_id"],
-            selected_peer_id=raw.get("selected_peer_id"),
+            selected_handle=raw.get("selected_handle") or raw.get("selected_peer_id"),
             mode=raw["mode"],
             provider_request=dict(raw["provider_request"]),
             intent_descriptor=dict(raw["intent_descriptor"]),
@@ -121,6 +130,12 @@ class PromptRequestEnvelope:
         envelope.validate()
         return envelope
 
+    @property
+    def selected_peer_id(self) -> str | None:
+        """Compatibility alias for old envelope JSON and callers."""
+
+        return self.selected_handle
+
     def prompt_text(self) -> str:
         if self.mode != VISIBLE_PROMPT_V1:
             raise ValueError("prompt text is not available for confidential envelopes")
@@ -130,12 +145,17 @@ class PromptRequestEnvelope:
         return text
 
     def validate(self) -> None:
-        if self.version != APP_ENVELOPE_VERSION:
+        if not supports_schema(self.version, APP_ENVELOPE_VERSION):
             raise ValueError(f"unsupported envelope version: {self.version}")
         if self.mode not in {VISIBLE_PROMPT_V1, CONFIDENTIAL_PROMPT_V1}:
             raise ValueError(f"unsupported prompt mode: {self.mode}")
         if not self.request_id:
             raise ValueError("request_id is required")
+        if self.selected_handle is not None:
+            try:
+                require_route_handle(self.selected_handle, field="envelope selected_handle")
+            except ProtocolInvariantError as exc:
+                raise ValueError(str(exc)) from exc
         if "mode" not in self.return_descriptor:
             raise ValueError("return_descriptor.mode is required")
         if self.return_descriptor.get("stream") and "ta_claim" not in self.return_descriptor:

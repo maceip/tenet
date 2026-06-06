@@ -24,9 +24,39 @@ from tenet.packet.OutfoxNode import (
 )
 from tenet.packet.OutfoxParams import OutfoxParams, derive_circuit_key
 
-from tenet.config import ClusterConfig, LoggingConfig
+from tenet.config import (
+    CAPABILITY_CONTROL_DHT,
+    CAPABILITY_EXPERT,
+    CAPABILITY_MIXNODE,
+    ClusterConfig,
+    LoggingConfig,
+    _normalize_role,
+)
 from tenet.envelope import PromptRequestEnvelope
 from tenet.log_events import PorLogEvent, emit_log_event
+from tenet.mixnet.control import (
+    CONTROL_SYNC_PREFIXES,
+    ControlBootstrap,
+    ControlDhtPeer,
+    MixnetControlService,
+    PersistentControlStore,
+    control_put,
+    decode_control_message,
+    encode_control_message,
+    is_control_datagram,
+)
+from tenet.mixnet.control.records import ControlRecordError
+from tenet.mixnet.control.wire import (
+    ControlWireMessage,
+    MSG_ERROR,
+    MSG_GET,
+    MSG_GET_RESPONSE,
+    MSG_HAVE,
+    MSG_PUT,
+    MSG_SYNC,
+    MSG_SYNC_RESPONSE,
+    signed_record_from_body,
+)
 from tenet.mixnet.wire_frame import decode_datagram, encode_forward
 
 
@@ -40,7 +70,7 @@ ReplyHandler = Callable[[PromptRequestEnvelope, str], Sequence[str]]
 CIRCUIT_ID_SIZE = 16
 KEY_SIZE = 16
 
-NodeRole = Literal["relay", "expert", "any"]
+NodeRole = Literal["mixnode", "relay", "expert", "any"]
 
 
 class WireNodeRuntime:
@@ -52,13 +82,21 @@ class WireNodeRuntime:
         role: NodeRole | None = None,
         logging: LoggingConfig | None = None,
         reply_handler: ReplyHandler | None = None,
+        control_store_path: str | None = None,
+        control_bootstrap_path: str | None = None,
+        control_verify_keys: dict[str, str] | None = None,
+        control_threshold: int = 1,
+        control_anti_entropy_interval_seconds: float = 0.0,
+        control_sync_prefixes: Sequence[str] = CONTROL_SYNC_PREFIXES,
+        control_replication_factor: int = 5,
     ):
         self.cluster = cluster
         self.node_id = node_id
         self.identity = cluster.node(node_id)
-        self.role: NodeRole = role or self.identity.role  # type: ignore[assignment]
-        if self.role not in {"relay", "expert", "any"}:
+        self.role: NodeRole = _normalize_role(role or self.identity.role)  # type: ignore[assignment]
+        if self.role not in {"mixnode", "expert", "any"}:
             self.role = "any"
+        self.capabilities = tuple(getattr(self.identity, "capabilities", ()) or ())
         params = cluster.params
         self.params = OutfoxParams(
             payload_size=params.payload_size,
@@ -73,6 +111,78 @@ class WireNodeRuntime:
         self._shutdown = False
         self.logging = logging or LoggingConfig()
         self._reply_handler = reply_handler
+        control_store = (
+            PersistentControlStore(control_store_path)
+            if control_store_path
+            else None
+        )
+        if control_bootstrap_path:
+            self.control = ControlBootstrap.load(control_bootstrap_path).to_control_service(
+                store=control_store,
+            )
+        else:
+            self.control = MixnetControlService(
+                network_id=str(getattr(cluster, "network_id", "") or "default"),
+                verify_keys=control_verify_keys or {},
+                threshold=control_threshold,
+                store=control_store,
+            )
+        self.control_anti_entropy_interval_seconds = float(
+            control_anti_entropy_interval_seconds
+        )
+        self.control_sync_prefixes = tuple(str(prefix) for prefix in control_sync_prefixes)
+        self.control_replication_factor = int(control_replication_factor)
+
+        # Real Kademlia control overlay (when the node has the capability).
+        # Every such node participates in the DHT for signed control records.
+        # We derive a distinct listen port (main + 1) so the Kademlia RPCs
+        # (iterative lookups, store, refresh, pings) do not collide with the
+        # mixnet Outfox wire or our custom TCTL control messages.
+        # Bootstrap contacts are other control_dht nodes from the local cluster
+        # view (they are expected to be listening on their declared port + 1).
+        # After the lib has a few live contacts it performs real peer discovery,
+        # k-bucket maintenance, and can locate/replicate records even after the
+        # original bootstrap peers are gone.
+        self._kademlia_overlay = None
+        if self._has_capability(CAPABILITY_CONTROL_DHT):
+            from tenet.mixnet.control.kademlia_overlay import KademliaControlOverlay
+
+            dht_port = int(self.identity.port) + 1
+            self._kademlia_overlay = KademliaControlOverlay(
+                self.node_id,
+                listen_host=self.identity.host,
+                listen_port=dht_port,
+                network_id=self.control.network_id,  # for network-scoped DHT keys (eclipse safety)
+            )
+            kad_contacts = []
+            for node in self.cluster.nodes.values():
+                if node.node_id != self.node_id and node.has_capability(CAPABILITY_CONTROL_DHT):
+                    kad_contacts.append((node.host, int(node.port) + 1))
+            self._kademlia_overlay.start(bootstrap=kad_contacts)
+            # Wire the overlay into the control service so that .get() can
+            # fall back to real iterative Kademlia lookup and every validated
+            # put is also published into the DHT (replicated by the library
+            # to the k closest nodes for the record key).
+            self.control._kademlia_overlay = self._kademlia_overlay
+
+            # Give the initial bootstrap (if any) a chance to populate the
+            # routing table before we republish. Without this, the persisted
+            # records could be published while the node still has no neighbors,
+            # causing the Kademlia set() to take only the local path instead of
+            # replicating to the k-closest. publish() will queue if mesh is not
+            # ready, but waiting here makes the "republish local truth on restart"
+            # happen at the semantically correct time.
+            self._kademlia_overlay.wait_for_mesh(timeout=3.0)
+
+            # Fix 2: persisted records were loaded in service.__init__ *before*
+            # the overlay was constructed/started. Re-publish them now so that
+            # a restarted node pushes its local control truth back into the DHT.
+            if self._kademlia_overlay is not None:
+                for srec in list(self.control._records.values()):
+                    try:
+                        self._kademlia_overlay.publish(srec.record.key, srec)
+                    except Exception:
+                        pass
         self.on_reach_control = None
         self.on_opaque_forward = None
         self.supernode_daemon = None
@@ -85,6 +195,9 @@ class WireNodeRuntime:
         )
         self._state_lock = threading.RLock()
         self._response_inflight: set[str] = set()
+
+    def _has_capability(self, capability: str) -> bool:
+        return capability in self.capabilities
 
     def install_signal_handlers(self) -> None:
         def _handle(_signum, _frame):
@@ -108,6 +221,12 @@ class WireNodeRuntime:
             return self.serve_on_socket(sock)
         finally:
             sock.close()
+            # Ensure overlay is stopped even on early exit paths.
+            if getattr(self, "_kademlia_overlay", None) is not None:
+                try:
+                    self._kademlia_overlay.stop()
+                except Exception:
+                    pass
             self._log("stopped", fields={"signal": True})
 
     def serve_on_socket(
@@ -134,16 +253,144 @@ class WireNodeRuntime:
                 return True
             return stop is not None and stop.is_set()
 
-        while not _should_stop():
-            try:
-                data, addr = sock.recvfrom(65535)
-            except socket.timeout:
-                continue
-            self._current_src_addr = addr
-            self._dispatch_binary(sock, data, addr)
-            if self.supernode_daemon is not None:
-                self.supernode_daemon.purge_if_due()
+        anti_entropy_stop = threading.Event()
+        anti_entropy_thread = self._start_control_anti_entropy(sock, anti_entropy_stop, stop)
+        try:
+            while not _should_stop():
+                try:
+                    data, addr = sock.recvfrom(65535)
+                except socket.timeout:
+                    continue
+                self._current_src_addr = addr
+                self._dispatch_binary(sock, data, addr)
+                if self.supernode_daemon is not None:
+                    self.supernode_daemon.purge_if_due()
+        finally:
+            anti_entropy_stop.set()
+            if anti_entropy_thread is not None:
+                anti_entropy_thread.join(timeout=1.0)
+            # Fix 3: stop the Kademlia overlay thread (if any) on socket close.
+            # The overlay was started in __init__ for CAPABILITY_CONTROL_DHT nodes.
+            if getattr(self, "_kademlia_overlay", None) is not None:
+                try:
+                    self._kademlia_overlay.stop()
+                except Exception:
+                    pass
         return 0
+
+    def _start_control_anti_entropy(
+        self,
+        sock: socket.socket,
+        stop: threading.Event,
+        external_stop: object | None,
+    ) -> threading.Thread | None:
+        if not self._has_capability(CAPABILITY_CONTROL_DHT):
+            return None
+        if self.control_anti_entropy_interval_seconds <= 0:
+            return None
+        thread = threading.Thread(
+            target=self._control_anti_entropy_loop,
+            args=(sock, stop, external_stop),
+            name=f"tenet-{self.node_id}-control-sync",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def _control_mixnode_peer_addrs(self) -> tuple[tuple[str, tuple[str, int]], ...]:
+        """Real gossip peer selection for signed control-record sync.
+
+        Prefer signed mixnode descriptors, then supplement with live Kademlia
+        routing-table contacts. Static cluster control nodes remain bootstrap
+        fallback only; once the overlay learns peers, control gossip no longer
+        depends solely on cluster.nodes.
+        """
+        limit = max(1, self.control_replication_factor - 1)
+        # Prefer signed descriptors from control (which may have arrived via
+        # Kademlia iterative lookup or wire gossip/sync). mixnode_dht_peers()
+        # already surfaces signed MIXNODE_DESCRIPTOR records.
+        signed = self.control.mixnode_dht_peers()
+        signed_ids = {p.node_id for p in signed} if signed else set()
+
+        peers: list[tuple[str, tuple[str, int]]] = []
+        for node in self.cluster.nodes.values():
+            if node.node_id == self.node_id:
+                continue
+            if signed_ids:
+                if node.node_id in signed_ids:
+                    peers.append((node.node_id, (node.host, int(node.port))))
+            elif node.has_capability(CAPABILITY_CONTROL_DHT):
+                peers.append((node.node_id, (node.host, int(node.port))))
+
+        peers.extend(self._kademlia_control_wire_contacts(limit=limit))
+        return self._dedupe_control_addrs(peers, limit=limit)
+
+    def _kademlia_control_wire_contacts(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[tuple[str, tuple[str, int]], ...]:
+        overlay = getattr(self, "_kademlia_overlay", None)
+        contacts = getattr(overlay, "control_wire_contacts", None)
+        if not callable(contacts):
+            return tuple()
+        try:
+            return tuple(contacts(limit=limit))
+        except Exception:
+            return tuple()
+
+    def _dedupe_control_addrs(
+        self,
+        peers: Sequence[tuple[str, tuple[str, int]]],
+        *,
+        limit: int,
+    ) -> tuple[tuple[str, tuple[str, int]], ...]:
+        own = (str(self.identity.host), int(self.identity.port))
+        out: list[tuple[str, tuple[str, int]]] = []
+        seen: set[tuple[str, int]] = set()
+        for peer_id, addr in sorted(peers, key=lambda item: (item[0], item[1][0], item[1][1])):
+            normalized = (str(addr[0]), int(addr[1]))
+            if normalized == own or normalized in seen:
+                continue
+            seen.add(normalized)
+            out.append((str(peer_id), normalized))
+            if len(out) >= max(0, int(limit)):
+                break
+        return tuple(out)
+
+    def _control_anti_entropy_loop(
+        self,
+        sock: socket.socket,
+        stop: threading.Event,
+        external_stop: object | None,
+    ) -> None:
+        def _should_stop() -> bool:
+            if self._shutdown or stop.is_set():
+                return True
+            if external_stop is None:
+                return False
+            is_set = getattr(external_stop, "is_set", None)
+            return callable(is_set) and bool(is_set())
+
+        while not _should_stop():
+            peers = self._control_mixnode_peer_addrs()
+            for peer_id, addr in peers:
+                for prefix in self.control_sync_prefixes:
+                    if _should_stop():
+                        return
+                    message = ControlWireMessage(
+                        MSG_SYNC,
+                        {"prefix": prefix, "cursor": "", "limit": 100},
+                    )
+                    try:
+                        sock.sendto(encode_control_message(message), addr)
+                    except OSError as exc:
+                        self._log(
+                            "control_sync_send_failed",
+                            level="warning",
+                            fields={"peer": peer_id, "reason": str(exc)},
+                        )
+            stop.wait(self.control_anti_entropy_interval_seconds)
 
     def _log(
         self,
@@ -153,13 +400,13 @@ class WireNodeRuntime:
         link_cid: str | None = None,
         fields: dict[str, object] | None = None,
     ) -> None:
-        component = f"tenet-{self.role}" if self.role in {"relay", "expert"} else "tenet-node"
+        component = "tenet-node"
         emit_log_event(
             PorLogEvent(
                 event=event,
                 component=component,
                 node_id=self.node_id,
-                role=self.role,
+                role=None,
                 level=level,
                 link_cid=link_cid,
                 fields=fields or {},
@@ -172,10 +419,15 @@ class WireNodeRuntime:
         from tenet.mixnet.reach_wire import is_reach_datagram
 
         # Demux order (fixed — I2P SSU2 style):
-        # 1. REACH_* control → reachability signaling
-        # 2. Outfox 0x00/0x01/0x02 → mix processing
-        # 3. Opaque forward → registered peer NAT relay
-        # 4. Unknown → drop + log
+        # 1. CONTROL_* → signed mixnet control-plane record exchange
+        # 2. REACH_* control → reachability signaling
+        # 3. Outfox 0x00/0x01/0x02 → mix processing
+        # 4. Opaque forward → registered peer NAT relay
+        # 5. Unknown → drop + log
+
+        if is_control_datagram(data):
+            self._handle_control_binary(sock, data, addr)
+            return
 
         if is_reach_datagram(data):
             if self.on_reach_control is not None:
@@ -201,6 +453,152 @@ class WireNodeRuntime:
                 level="warning",
                 fields={"wire": "binary", "bytes": len(data)},
             )
+
+    def _handle_control_binary(self, sock: socket.socket, data: bytes, addr) -> None:
+        try:
+            message = decode_control_message(data)
+            if message.kind in {MSG_GET_RESPONSE, MSG_SYNC_RESPONSE, MSG_HAVE, MSG_ERROR}:
+                self._ingest_control_message(message)
+                return
+            response = self._control_response(message)
+            if message.kind == MSG_PUT and not bool(message.body.get("replicated", False)):
+                signed = signed_record_from_body(message.body)
+                if signed is not None:
+                    self._replicate_control_put(sock, signed)
+        except Exception as exc:
+            response = ControlWireMessage(MSG_ERROR, {"error": str(exc)})
+        sock.sendto(encode_control_message(response), addr)
+
+    def _ingest_control_message(self, message: ControlWireMessage) -> int:
+        body = message.body
+        if message.kind == MSG_ERROR:
+            self._log("control_peer_error", level="warning", fields=dict(body))
+            return 0
+        if message.kind == MSG_HAVE:
+            return 0
+        records = []
+        if message.kind == MSG_GET_RESPONSE:
+            record = body.get("record")
+            if isinstance(record, dict):
+                records = [record]
+        elif message.kind == MSG_SYNC_RESPONSE:
+            raw_records = body.get("records") or []
+            if isinstance(raw_records, list):
+                records = [record for record in raw_records if isinstance(record, dict)]
+        else:
+            return 0
+        stored = 0
+        for raw in records:
+            try:
+                signed = signed_record_from_body({"record": raw})
+                if signed is None:
+                    continue
+                self.control.put_signed(signed)
+                stored += 1
+            except (ControlRecordError, ValueError, TypeError, AttributeError) as exc:
+                self._log(
+                    "control_record_rejected",
+                    level="warning",
+                    fields={"reason": str(exc), "source": "peer_sync"},
+                )
+        return stored
+
+    def _control_response(self, message: ControlWireMessage) -> ControlWireMessage:
+        body = message.body
+        if message.kind == MSG_GET:
+            key = str(body.get("key", ""))
+            signed = self.control.get(key)
+            return ControlWireMessage(
+                MSG_GET_RESPONSE,
+                {"key": key, "record": signed.to_dict() if signed is not None else None},
+            )
+        if message.kind == MSG_PUT:
+            signed = signed_record_from_body(body)
+            if signed is None:
+                raise ControlRecordError("control PUT requires signed record")
+            self.control.put_signed(signed)
+            return ControlWireMessage(MSG_HAVE, self.control.have(signed.record.key) or {})
+        if message.kind == MSG_SYNC:
+            return ControlWireMessage(
+                MSG_SYNC_RESPONSE,
+                self.control.sync(
+                    prefix=str(body.get("prefix", "")),
+                    cursor=str(body.get("cursor", "")),
+                    limit=int(body.get("limit", 100)),
+                ),
+            )
+        if message.kind == MSG_HAVE:
+            return ControlWireMessage(MSG_HAVE, dict(body))
+        raise ControlRecordError(f"unsupported control message kind: {message.kind}")
+
+    def _control_dht_peers(self) -> tuple[ControlDhtPeer, ...]:
+        signed = self.control.mixnode_dht_peers()
+        if signed:
+            return signed
+        return tuple(
+            ControlDhtPeer(node.node_id, node.kem_pk_hex)
+            for node in sorted(self.cluster.nodes.values(), key=lambda item: item.node_id)
+            if node.has_capability(CAPABILITY_CONTROL_DHT)
+        )
+
+    def _control_responsible_mixnode_addrs(
+        self,
+        signed,
+    ) -> tuple[tuple[str, tuple[str, int]], ...]:
+        peers = self._control_dht_peers()
+        if not peers:
+            return self._dedupe_control_addrs(
+                self._kademlia_control_wire_contacts(
+                    limit=max(1, self.control_replication_factor - 1)
+                ),
+                limit=max(1, self.control_replication_factor - 1),
+            )
+        plan = self.control.replication_plan(
+            signed,
+            peers,
+            replication_factor=self.control_replication_factor,
+        )
+        by_id = {node.node_id: node for node in self.cluster.nodes.values()}
+        out = []
+        for node_id in plan.responsible_nodes:
+            if node_id == self.node_id:
+                continue
+            node = by_id.get(node_id)
+            if node is not None:
+                out.append((node_id, (node.host, int(node.port))))
+        if len(out) < max(1, self.control_replication_factor - 1):
+            out.extend(
+                self._kademlia_control_wire_contacts(
+                    limit=max(1, self.control_replication_factor - len(out))
+                )
+            )
+        return self._dedupe_control_addrs(
+            out,
+            limit=max(1, self.control_replication_factor - 1),
+        )
+
+    def _replicate_control_put(self, sock: socket.socket, signed) -> None:
+        if not self._has_capability(CAPABILITY_CONTROL_DHT):
+            return
+        peers = self._control_responsible_mixnode_addrs(signed)
+        if not peers:
+            return
+        message = control_put(signed)
+        message = ControlWireMessage(message.kind, {**message.body, "replicated": True})
+        datagram = encode_control_message(message)
+        for peer_id, addr in peers:
+            try:
+                sock.sendto(datagram, addr)
+            except OSError as exc:
+                self._log(
+                    "control_dht_put_failed",
+                    level="warning",
+                    fields={
+                        "peer": peer_id,
+                        "key": signed.record.key,
+                        "reason": str(exc),
+                    },
+                )
 
     def _handle_forward_binary(
         self,
@@ -272,8 +670,8 @@ class WireNodeRuntime:
             )
             return
 
-        if self.role == "relay":
-            self._log("forward_exit_disallowed", level="warning")
+        if not self._has_capability(CAPABILITY_EXPERT):
+            self._log("forward_exit_no_expert_capability", level="warning")
             return
 
         final_result = outfox_process(
@@ -439,7 +837,7 @@ class WireNodeRuntime:
         # If this is the exit (no next_id or next_id is empty) and we get a
         # circuit packet, check if the decrypted content is a new prompt envelope
         # for circuit reuse (multi-turn conversation).
-        if self.role == "expert" and (not next_id or next_id == "client"):
+        if self._has_capability(CAPABILITY_EXPERT) and (not next_id or next_id == "client"):
             from tenet.packet.OutfoxNode import circuit_packet_decrypt
             plain = circuit_packet_decrypt(self.params, key, packet)
             if plain is not None:
@@ -612,7 +1010,7 @@ class WireNodeRuntime:
                 else:
                     sock.sendto(data, peer_addr)
                 return
-        if self.role == "expert" and src_addr is not None:
+        if self._has_capability(CAPABILITY_EXPERT) and src_addr is not None:
             sock.sendto(data, src_addr)
             return
         # Relay must discover next hop via REACH forwarding table, not static config.

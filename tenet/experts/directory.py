@@ -19,11 +19,13 @@ from urllib.request import Request, urlopen
 
 from tenet.experts.expert_route import PeerCandidate, PeerObservation, RouteIntent
 from tenet.experts.memory_index import MemoryManifest
+from tenet.handles import is_opaque_handle, opaque_handle_record_from_dict
+from tenet.schema import normalize_schema, supports_schema
 
 
 PUBLIC_SNAPSHOT_V1 = "public_snapshot_v1"
 PRIVATE_DISCOVERY_V1 = "private_discovery_v1"
-DIRECTORY_SNAPSHOT_VERSION = "por.directory_snapshot.v1"
+DIRECTORY_SNAPSHOT_VERSION = "tenet.directory_snapshot.2026-06"
 DEFAULT_SNAPSHOT_FETCH_TIMEOUT_SECONDS = 5.0
 DEFAULT_MAX_SNAPSHOT_BYTES = 5_000_000
 
@@ -53,10 +55,31 @@ class PeerRecord:
     def peer_id(self) -> str:
         return self.manifest.peer_id
 
-    def candidate(self) -> PeerCandidate:
+    def route_handle(self, *, now: float | None = None) -> str | None:
+        if self.handle is None:
+            return None
+        try:
+            record = opaque_handle_record_from_dict(self.handle)
+        except (TypeError, ValueError):
+            return None
+        if record.is_expired(now):
+            return None
+        if not is_opaque_handle(record.handle):
+            return None
+        return record.handle
+
+    def candidate(self, *, now: float | None = None) -> PeerCandidate | None:
         if self.observation and self.observation.peer_id != self.peer_id:
             raise ValueError("observation peer_id must match manifest peer_id")
-        return PeerCandidate(self.manifest, self.observation)
+        handle = self.route_handle(now=now)
+        if handle is None:
+            return None
+        return PeerCandidate(
+            self.manifest,
+            self.observation,
+            route_handle=handle,
+            publisher_id=self.peer_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -129,10 +152,11 @@ class DirectorySnapshot:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "DirectorySnapshot":
         version = raw.get("version")
-        if version != DIRECTORY_SNAPSHOT_VERSION:
+        if not supports_schema(str(version), DIRECTORY_SNAPSHOT_VERSION):
             raise DirectorySnapshotFormatError(
                 f"unsupported directory snapshot version: {version!r}"
             )
+        version = normalize_schema(str(version), DIRECTORY_SNAPSHOT_VERSION)
 
         generated_at = raw.get("generated_at")
         if not isinstance(generated_at, str) or not generated_at:
@@ -267,13 +291,10 @@ class PublicManifestDirectory:
             if record.handle is not None
         }
 
-    def routing_kem_pk_hex(self, peer_id: str) -> str | None:
-        for record in self.records:
-            if record.peer_id != peer_id or not record.descriptor:
-                continue
-            kem = record.descriptor.get("kem_pk") or record.descriptor.get("kem_pk_hex")
-            if kem:
-                return str(kem)
+    def routing_kem_pk_hex(self, _handle: str) -> str | None:
+        # Public snapshots may carry manifests and handle records, but they are
+        # not a mailbox. Product routing key lookup must go through handle
+        # resolution, not public descriptor material keyed by peer_id.
         return None
 
     def discover(self, request: DiscoveryRequest) -> DiscoveryResult:
@@ -282,18 +303,23 @@ class PublicManifestDirectory:
                 f"{request.mode} is not configured; only {PUBLIC_SNAPSHOT_V1} is available"
             )
 
-        records = self.records
+        candidates = tuple(
+            candidate
+            for record in self.records
+            for candidate in (record.candidate(),)
+            if candidate is not None
+        )
         note = (
-            "public snapshot returned for local ranking; prompt and exact "
-            "interest were not sent to the directory"
+            "public snapshot returned handle-bearing records for local ranking; "
+            "prompt and exact interest were not sent to the directory"
         )
         if request.max_records is not None:
             note += "; max_records ignored so public discovery does not truncate before scoring"
 
         return DiscoveryResult(
-            candidates=tuple(record.candidate() for record in records),
+            candidates=candidates,
             mode=PUBLIC_SNAPSHOT_V1,
-            snapshot_size=len(records),
+            snapshot_size=len(self.records),
             exact_query_sent=False,
             private_query_used=False,
             generated_at=datetime.now(timezone.utc).isoformat(),
@@ -408,9 +434,8 @@ def _peer_record_from_dict(raw: object) -> PeerRecord:
         descriptor=descriptor,
         handle=handle,
     )
-    try:
-        record.candidate()
-    except ValueError as exc:
+    if record.observation and record.observation.peer_id != record.peer_id:
+        exc = ValueError("observation peer_id must match manifest peer_id")
         raise DirectorySnapshotFormatError(str(exc)) from exc
     return record
 

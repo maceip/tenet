@@ -1,5 +1,11 @@
-# Real-matcher Nitro EIF: tenet matcher on loopback :8080, fronted by
-# attested-workload app-proxy over attested TLS.
+# Real-matcher Nitro EIF (specialized TEE workload for the oblivious matcher/mailbox).
+#
+# This is DISTINCT from the modern mixnet node image:
+#   deploy/Dockerfile.node  → general WireNodeRuntime containers (mixnode, control_dht
+#                               with real Kademlia, expert, etc.) used by the sim/ framework.
+#
+# This image packages the matcher inside an enclave (with bountynet attestation
+# shim + the oblivious-core selector). It is for the "real matcher" Nitro path.
 #
 # Build context: run ./assemble-matcher-eif.sh (or copy artifacts manually):
 #   bountynet-bin      <- attested-workload (deploy/build-bountynet-bin.sh)

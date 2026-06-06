@@ -15,7 +15,7 @@ from tenet.experts.directory import PeerRecord
 from tenet.experts.memory_index import STOPWORDS, TOKEN_RE
 
 
-GROUP_TAXONOMY_VERSION = "por.expert_groups.v1"
+GROUP_TAXONOMY_VERSION = "tenet.expert_groups.2026-06"
 ROOT_GROUP_ID = "root"
 GENERAL_GROUP_ID = "general"
 

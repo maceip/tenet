@@ -1,0 +1,100 @@
+# All-local Docker scenario (Mode 1).
+#
+# Runs entirely on one machine's Docker daemon.
+# We still declare *logical* sites ("home", "faraway") so that:
+# - Nodes are grouped for netem (different "sites" get different latency/loss between them).
+# - You can later move "faraway" nodes to a real second laptop or cloud VM by
+#   changing only the site runner + ssh/external_host, without touching the logical fleet.
+#
+# This fleet exercises the *real* core:
+# - Multiple control_dht nodes (Kademlia overlay on port+1, mesh-ready sequencing,
+#   network-scoped DHT keys, republish-on-restart, size bounds).
+# - Mixnodes / relays.
+# - A workload that resolves via control records (DHT/gossip) and sends over the mixnet
+#   (planner produces a forward plan with no direct endpoints).
+#
+# Bring up:
+#   uv run python -m sim up sim/scenarios/all-local-docker-small.yaml --netem --wait
+#
+# Then:
+#   uv run python -m sim status
+#   uv run python -m sim logs dht-home-1 --follow
+#   uv run python -m sim run-workload ...
+#   uv run python -m sim chaos partition home faraway --duration 15
+#   uv run python -m sim down --clean
+
+network_id: "sim-core-2026-06"
+# Global default for sites that don't declare their own tee_mode.
+# For any sim run that does not have real cloud TEE (Nitro EIF + bountynet),
+# use "none" or "mock". "mock" lets you still exercise the attestation receipt
+# record family and trust rules in the control plane without a real TEE.
+default_tee_mode: none
+
+mixnet:
+  payload_size: 2048
+  routing_size: 16
+  max_hops: 5
+
+sites:
+  home:
+    runner: local-docker
+    # TEE modeling for this sim run (no real cloud Nitro in pure local-docker mode).
+    # Reasonable options when there is no cloud-TEE:
+    #   none  - experts and matchers run the plain (non-attested) code paths.
+    #   mock  - the sim can still publish fake AttestationReceipt control records
+    #           so the trust / control-plane TEE-claim paths are exercised.
+    #   nitro - only useful when the runner can actually launch inside a real TEE.
+    tee_mode: none
+    # All containers in this scenario will live on a single user-defined docker network.
+    # The "home" vs "faraway" distinction is enforced via tc netem inside the containers.
+  faraway:
+    runner: local-docker
+    tee_mode: none
+    # Same physical Docker; treated as a distant site for latency/loss simulation.
+
+links:
+  - from: home
+    to: faraway
+    latency_ms: 35
+    loss_percent: 0.3
+    jitter_ms: 4
+
+nodes:
+  # Two control_dht participants in different logical sites.
+  # This forces real iterative Kademlia lookup + replication across the "sites".
+  - id: dht-home-1
+    placement: home
+    capabilities: [control_dht, mixnode]
+    persist: true
+  - id: dht-far-1
+    placement: faraway
+    capabilities: [control_dht, mixnode]
+    persist: true
+
+  # Additional mix/relay nodes (no DHT cap; they still participate in wire gossip
+  # and can be part of mixnet paths).
+  - id: relay-home-1
+    placement: home
+    capabilities: [mixnode]
+  - id: relay-far-1
+    placement: faraway
+    capabilities: [mixnode]
+
+  # One expert that can serve a simple pool (the workload will target it via
+  # control-plane name resolution + planner + real mixnet).
+  - id: expert-demo
+    placement: faraway
+    capabilities: [expert, mixnode]
+    # The sim (or the node itself on start) can publish an initial expert/pool
+    # descriptor so that name resolution works without extra manual steps.
+    seeds:
+      pool: "pool~demo~tenet"
+
+workloads:
+  - name: basic-mixnet-roundtrip
+    type: mixnet_client
+    placement: home
+    target: "pool~demo~tenet"
+    count: 3
+    expect_success: true
+    timeout_s: 25.0

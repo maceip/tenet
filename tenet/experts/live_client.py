@@ -17,6 +17,8 @@ from tenet.config import (
 from tenet.experts.expert_mode import ExpertModeConfig
 from tenet.experts.live_enclave import LiveEnclaveConfig, build_attested_client
 from tenet.experts.matcher import PLAIN_MATCHER_V1
+from tenet.mixnet.control.live_sync import CONTROL_SYNC_PREFIXES, sync_control_from_cluster
+from tenet.mixnet.control.service import MixnetControlService
 
 
 DEFAULT_MAILBOX_CLIENT = (
@@ -72,9 +74,13 @@ def send_live_enclave(
     *,
     prompt: str,
     requested_expertise: str | None = None,
+    service_name: str | None = None,
     timeout: float = 30.0,
     random_seed: int | None = None,
     mailbox_datagram_delivery_enabled: bool | None = None,
+    control_service: MixnetControlService | None = None,
+    match_gossip_salt: str | None = None,
+    control_sync_prefixes=CONTROL_SYNC_PREFIXES,
 ) -> ClientRunResult:
     """Attest, plan, and deliver one envelope through the live enclave mailbox."""
     client = build_attested_client(
@@ -82,16 +88,24 @@ def send_live_enclave(
         mailbox_datagram_delivery_enabled=mailbox_datagram_delivery_enabled,
     )
     client.establish()
+    sync_control_from_cluster(
+        control_service,
+        mailbox_config.cluster,
+        prefixes=control_sync_prefixes,
+    )
     return run_client_once(
         cluster=mailbox_config.cluster,
         discovery_provider=client,
         prompt=prompt,
         requested_expertise=requested_expertise,
+        service_name=service_name,
         timeout=timeout,
         expert_mode_config=mailbox_config.expert_mode,
         peer_address_config=mailbox_config.peer_address,
         trusted_reachability_relays=mailbox_config.trusted_reachability_relays,
         random_seed=random_seed,
+        control_service=control_service,
+        match_gossip_salt=match_gossip_salt,
     )
 
 
@@ -101,30 +115,43 @@ def send_live_enclave_summary(
     *,
     prompt: str,
     requested_expertise: str | None = None,
+    service_name: str | None = None,
     timeout: float = 30.0,
     random_seed: int | None = None,
     mailbox_datagram_delivery_enabled: bool | None = None,
+    control_service: MixnetControlService | None = None,
+    match_gossip_salt: str | None = None,
+    control_sync_prefixes=CONTROL_SYNC_PREFIXES,
 ) -> dict[str, object]:
     client = build_attested_client(
         enclave_config,
         mailbox_datagram_delivery_enabled=mailbox_datagram_delivery_enabled,
     )
     att = client.establish()
+    sync_control_from_cluster(
+        control_service,
+        mailbox_config.cluster,
+        prefixes=control_sync_prefixes,
+    )
     result = run_client_once(
         cluster=mailbox_config.cluster,
         discovery_provider=client,
         prompt=prompt,
         requested_expertise=requested_expertise,
+        service_name=service_name,
         timeout=timeout,
         expert_mode_config=mailbox_config.expert_mode,
         peer_address_config=mailbox_config.peer_address,
         trusted_reachability_relays=mailbox_config.trusted_reachability_relays,
         random_seed=random_seed,
+        control_service=control_service,
+        match_gossip_salt=match_gossip_salt,
     )
     return {
         "ok": not result.fallback_used and bool(result.response_text.strip()),
         "url": enclave_config.url,
         "prompt": prompt,
+        "selected_handle": result.selected_handle,
         "selected_peer_id": result.selected_peer_id,
         "fallback_used": result.fallback_used,
         "degraded_anonymity": result.degraded_anonymity,

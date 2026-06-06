@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tenet"
+version = "0.1.0"
+description = "tenet — an expert-routing mixnet (Sphinx packet format core)."
+license = "BSD-2-Clause"
+authors = [
+  { name = "George Danezis", email = "g.danezis@ucl.ac.uk" },
+]
+requires-python = ">=3.10"
+urls = { Homepage = "http://sphinxmix.readthedocs.io/en/latest/" }
+
+# Runtime dependencies. These are the packages another machine needs to
+# `uv pip install -e .` (or `uv sync` after adding a lock) and run the tenet
+# client, mixnodes, experts, etc. Test-only tooling lives under optional deps.
+dependencies = [
+  "future >= 0.14.3",
+  "msgpack-python >= 0.4.6",
+  "pynacl >= 1.1.0",
+  "aioquic >= 1.3.0",
+  "pqcrypto >= 0.4.0",
+  "kademlia>=2.2.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest >= 3.0.0",
+  "pytest-cov >= 4.0.0",
+  "coverage >= 7.0.0",
+  "pyyaml >= 6.0",
+]
+test = [
+  "pytest >= 3.0.0",
+  "future >= 0.14.3",
+  "msgpack-python >= 0.4.6",
+  "pynacl >= 1.1.0",
+  "aioquic >= 1.3.0",
+  "pqcrypto >= 0.4.0",
+]
+
+[project.scripts]
+tenet = "tenet.edges.cli.main:main"
+tenet-relay = "tenet.edges.cli.main:legacy_relay_main"
+tenet-expert = "tenet.edges.cli.main:legacy_expert_main"
+tenet-client = "tenet.edges.cli.main:legacy_client_main"
+tenet-directory = "tenet.edges.cli.directory:main"
+
+[tool.setuptools.packages.find]
+include = ["tenet", "tenet.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+# Notes for uv users on other machines:
+#   uv venv
+#   uv pip install -e '.[dev]'
+#   uv run pytest
+#
+# Or with uv's project workflow (recommended for clean repro):
+#   uv sync --dev
+#   uv run tenet --help
+#
+# The real work (Kademlia DHT for control overlay, gossip, real node runtime,
+# contract tests, etc.) will add further dependencies here (e.g. "kademlia").
+# Add them via `uv add <pkg>` so the lockfile and this file stay in sync.

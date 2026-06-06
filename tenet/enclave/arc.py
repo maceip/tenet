@@ -12,8 +12,10 @@ from dataclasses import asdict, dataclass
 from typing import Mapping
 from uuid import uuid4
 
+from tenet.schema import normalize_schema, supports_schema
 
-NOOP_ARC_CREDENTIAL_VERSION = "por.arc.noop_credential.v1"
+
+NOOP_ARC_CREDENTIAL_VERSION = "tenet.arc.noop_credential.2026-06"
 
 
 @dataclass(frozen=True)
@@ -43,8 +45,9 @@ class NoopArcCredential:
 
 def noop_arc_credential_from_dict(raw: Mapping[str, object]) -> NoopArcCredential:
     version = str(raw.get("version", ""))
-    if version != NOOP_ARC_CREDENTIAL_VERSION:
+    if not supports_schema(version, NOOP_ARC_CREDENTIAL_VERSION):
         raise ValueError(f"unsupported ARC credential version: {version!r}")
+    version = normalize_schema(version, NOOP_ARC_CREDENTIAL_VERSION)
     presentation_id = str(raw.get("presentation_id", ""))
     if not presentation_id:
         raise ValueError("ARC credential presentation_id is required")

@@ -99,7 +99,7 @@ def run_directory_from_daemon(daemon, por_config=None) -> int:
                 snapshot = DirectorySnapshot(
                     records=(),
                     generated_at=datetime.now(timezone.utc).isoformat(),
-                    source="por.config.v1",
+                    source="tenet.config.2026-06",
                 )
             else:
                 snapshot = DirectorySnapshot.load(daemon.directory.snapshot_path)

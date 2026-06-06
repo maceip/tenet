@@ -18,30 +18,47 @@ from tenet.packet.OutfoxNode import circuit_packet_decrypt
 from tenet.packet.OutfoxParams import OutfoxParams
 
 from tenet.config import (
+    CAPABILITY_CONTROL_DHT,
+    CAPABILITY_MIXNODE,
     ClusterConfig,
     PeerAddressConfig,
     ProviderConfig,
     TrustedReachabilityRelayConfig,
 )
 from tenet.experts.directory import DiscoveryProvider
+from tenet.experts.directory import PrivateDiscoveryUnavailable
 from tenet.envelope import PromptRequestEnvelope
-from tenet.experts.expert_mode import ExpertModeConfig, prepare_expert_mode_request
+from tenet.experts.expert_mode import (
+    ExpertModeConfig,
+    prepare_match_result_gossip_request,
+    prepare_expert_mode_request,
+    prepare_stable_name_request,
+)
 from tenet.experts.expert_route import RouteIntent
 from tenet.handles import HandleResolution
+from tenet.mixnet.control import query_commitment
 from tenet.mixnet.node_runtime import build_native_forward_plan
 from tenet.mixnet.peer_address import ROUTE_RELAY, build_dial_plan, peer_address_record_from_dict, verify_record_signature
+from tenet.mixnet.planner import MixnetPlanningError, build_forward_plan, resolve_name_binding
 from tenet.llm.provider import stream_frontier_reply
 from tenet.mixnet.transport_dial import DialTarget, resolve_dial_target
 from tenet.mixnet.wire_frame import encode_forward, encode_shutdown, decode_datagram
+from tenet.protocol_invariants import ProtocolInvariantError, require_route_handle
 
 
 @dataclass(frozen=True)
 class ClientRunResult:
-    selected_peer_id: str | None
+    selected_handle: str | None
     degraded_anonymity: bool
     fallback_used: bool
     response_text: str
     client_logs: str
+
+    @property
+    def selected_peer_id(self) -> str | None:
+        """Compatibility alias for one schema transition."""
+
+        return self.selected_handle
 
 
 @dataclass(frozen=True)
@@ -58,6 +75,7 @@ def run_client_once(
     discovery_provider: DiscoveryProvider,
     prompt: str,
     requested_expertise: str | None = None,
+    service_name: str | None = None,
     relay_path: Sequence[str] = (),
     timeout: float = 8.0,
     expert_mode_config: ExpertModeConfig | None = None,
@@ -68,6 +86,8 @@ def run_client_once(
     provider_config: ProviderConfig | None = None,
     on_chunk: Callable[[dict[str, object]], None] | None = None,
     client_sock: socket.socket | None = None,
+    control_service=None,
+    match_gossip_salt: str | None = None,
 ) -> ClientRunResult:
     """Plan one Expert Mode request and send the prepared envelope if selected.
 
@@ -76,21 +96,93 @@ def run_client_once(
     a port open to avoid rebind races) pass it through to the send path.
     """
 
+    control_logs: list[str] = []
+    stable_binding = None
+    control_mix_path: tuple[str, ...] = ()
+    pool_name_for_gossip = None
+    if service_name:
+        try:
+            binding = resolve_name_binding(service_name, control_service=control_service)
+        except MixnetPlanningError as exc:
+            response = "".join(stream_frontier_reply(prompt, str(exc), provider_config))
+            return ClientRunResult(
+                selected_handle=None,
+                degraded_anonymity=False,
+                fallback_used=True,
+                response_text=response,
+                client_logs=f"client event=tenet_name_unresolved name={service_name} reason={exc}",
+            )
+        if binding.opaque_handle is not None:
+            stable_binding = binding
+        if binding.mix_path:
+            control_mix_path = tuple(binding.mix_path)
+        if binding.pool_name is not None:
+            pool_name_for_gossip = binding.pool_name
+        if binding.requested_expertise and requested_expertise is None:
+            requested_expertise = binding.requested_expertise
+        control_logs.append(
+            "client event=tenet_name_bound name={name} kind={kind} transport={transport} expertise={expertise}".format(
+                name=binding.name,
+                kind=binding.name_kind,
+                transport=binding.transport,
+                expertise=binding.requested_expertise or "",
+            )
+        )
+
     intent = RouteIntent(
         prompt=prompt,
         requested_expertise=requested_expertise,
         random_seed=random_seed,
     )
-    prepared = prepare_expert_mode_request(
-        intent,
-        discovery_provider,
-        expert_mode_config or ExpertModeConfig(),
-    )
+    if stable_binding is not None and stable_binding.opaque_handle is not None:
+        prepared = prepare_stable_name_request(
+            intent,
+            selected_handle=stable_binding.opaque_handle,
+            config=expert_mode_config or ExpertModeConfig(),
+            descriptor_hash=stable_binding.descriptor_hash,
+        )
+        control_logs.append(
+            "client event=tenet_name_stable_bound name={name} handle={handle}".format(
+                name=stable_binding.name,
+                handle=stable_binding.opaque_handle,
+            )
+        )
+    else:
+        gossip = _prepare_from_match_gossip(
+            intent=intent,
+            control_service=control_service,
+            pool_name=pool_name_for_gossip,
+            salt=match_gossip_salt,
+            config=expert_mode_config or ExpertModeConfig(),
+        )
+        if gossip is not None:
+            prepared, gossip_logs = gossip
+            control_logs.extend(gossip_logs)
+        else:
+            try:
+                prepared = prepare_expert_mode_request(
+                    intent,
+                    discovery_provider,
+                    expert_mode_config or ExpertModeConfig(),
+                )
+            except PrivateDiscoveryUnavailable:
+                gossip = _prepare_from_match_gossip(
+                    intent=intent,
+                    control_service=control_service,
+                    pool_name=pool_name_for_gossip,
+                    salt=match_gossip_salt,
+                    config=expert_mode_config or ExpertModeConfig(),
+                )
+                if gossip is None:
+                    raise
+                prepared, gossip_logs = gossip
+                control_logs.extend(gossip_logs)
 
     logs = [
+        *control_logs,
         "client event=expert_plan selected={selected} degraded_anonymity={degraded} "
         "fallback_used={fallback} pool_tier={pool_tier}".format(
-            selected=prepared.trace.selected_peer_id or "none",
+            selected=prepared.trace.selected_handle or "none",
             degraded=str(prepared.plan.pool.degraded_anonymity).lower(),
             fallback=str(not prepared.use_expert).lower(),
             pool_tier=prepared.trace.pool_tier,
@@ -98,27 +190,60 @@ def run_client_once(
     ]
 
     if not prepared.use_expert or prepared.envelope is None:
-        reason = prepared.trace.fallback_reason or "no expert selected"
+        gossip = _prepare_from_match_gossip(
+            intent=intent,
+            control_service=control_service,
+            pool_name=pool_name_for_gossip,
+            salt=match_gossip_salt,
+            config=expert_mode_config or ExpertModeConfig(),
+        )
+        if gossip is not None:
+            prepared, gossip_logs = gossip
+            logs.extend(gossip_logs)
+        else:
+            reason = prepared.trace.fallback_reason or "no expert selected"
+            response = "".join(stream_frontier_reply(prompt, reason, provider_config))
+            return ClientRunResult(
+                selected_handle=None,
+                degraded_anonymity=prepared.plan.pool.degraded_anonymity,
+                fallback_used=True,
+                response_text=response,
+                client_logs="\n".join(logs),
+            )
+
+    selected_handle = prepared.envelope.selected_handle
+    try:
+        selected_handle = require_route_handle(
+            selected_handle,
+            field="selected route target",
+        )
+    except ProtocolInvariantError:
+        reason = "selected_route_target_not_opaque_handle"
         response = "".join(stream_frontier_reply(prompt, reason, provider_config))
+        logs.append(
+            "client event=route_target_rejected reason={reason} selected={selected}".format(
+                reason=reason,
+                selected=selected_handle or "none",
+            )
+        )
         return ClientRunResult(
-            selected_peer_id=None,
+            selected_handle=selected_handle,
             degraded_anonymity=prepared.plan.pool.degraded_anonymity,
             fallback_used=True,
             response_text=response,
             client_logs="\n".join(logs),
         )
-
-    selected_peer_id = prepared.envelope.selected_peer_id
+    requested_mix_path = control_mix_path or tuple(relay_path)
     route_result = _plan_relay_path_for_mailbox_delivery(
-        selected_handle=selected_peer_id,
-        relay_path=tuple(relay_path),
+        selected_handle=selected_handle,
+        relay_path=requested_mix_path,
         peer_address_config=peer_address_config,
         discovery_provider=discovery_provider,
     )
     if route_result is None:
         route_result = _plan_relay_path_from_handle(
-            selected_handle=selected_peer_id,
-            relay_path=tuple(relay_path),
+            selected_handle=selected_handle,
+            relay_path=requested_mix_path,
             peer_address_config=peer_address_config,
             discovery_provider=discovery_provider,
             trusted_reachability_relays=tuple(trusted_reachability_relays),
@@ -127,17 +252,17 @@ def run_client_once(
     if route_result is None:
         if peer_address_config is not None and peer_address_config.enabled:
             route_result = _PeerAddressRouteResult(
-                relay_path=tuple(relay_path),
+                relay_path=requested_mix_path,
                 logs=("client event=handle_resolver_missing",),
                 blocked_reason="handle_resolver_required",
             )
         else:
-            route_result = _PeerAddressRouteResult(relay_path=tuple(relay_path), logs=())
+            route_result = _PeerAddressRouteResult(relay_path=requested_mix_path, logs=())
     logs.extend(route_result.logs)
     if route_result.blocked_reason is not None:
         response = "".join(stream_frontier_reply(prompt, route_result.blocked_reason, provider_config))
         return ClientRunResult(
-            selected_peer_id=selected_peer_id,
+            selected_handle=selected_handle,
             degraded_anonymity=prepared.plan.pool.degraded_anonymity,
             fallback_used=True,
             response_text=response,
@@ -146,23 +271,31 @@ def run_client_once(
     if not _routing_node_available(
         cluster,
         discovery_provider,
-        selected_peer_id,
+        selected_handle,
         relay_path=route_result.relay_path,
     ):
         response = "".join(
-            stream_frontier_reply(prompt, "selected expert peer not in cluster", provider_config)
+            stream_frontier_reply(prompt, "selected handle is not currently routeable", provider_config)
         )
-        logs.append("client event=selected_peer_missing fallback_used=true")
+        logs.append("client event=selected_handle_unrouteable fallback_used=true")
         return ClientRunResult(
-            selected_peer_id=selected_peer_id,
+            selected_handle=selected_handle,
             degraded_anonymity=prepared.plan.pool.degraded_anonymity,
             fallback_used=True,
             response_text=response,
             client_logs="\n".join(logs),
         )
 
-    relay_path = route_result.relay_path
-    forward_path = tuple(relay_path) + (selected_peer_id,)
+    forward_plan = build_forward_plan(
+        exit_handle=selected_handle,
+        mix_path=route_result.relay_path,
+        dial_target=route_result.dial_target,
+        source="expert-selection",
+        min_mix_hops=1 if route_result.relay_path else 0,
+        known_mixnodes=_known_mixnode_ids(cluster, control_service),
+    )
+    logs.append(forward_plan.log_line())
+    forward_path = forward_plan.forward_path
     _validate_forward_path(cluster, forward_path, discovery_provider)
     response, stream_logs = send_prepared_envelope(
         cluster=cluster,
@@ -170,13 +303,13 @@ def run_client_once(
         envelope=prepared.envelope,
         timeout=timeout,
         on_chunk=on_chunk,
-        dial_target=route_result.dial_target,
+        dial_target=forward_plan.dial_target,
         discovery_provider=discovery_provider,
         client_sock=client_sock,
     )
     logs.extend(stream_logs)
     return ClientRunResult(
-        selected_peer_id=selected_peer_id,
+        selected_handle=selected_handle,
         degraded_anonymity=prepared.plan.pool.degraded_anonymity,
         fallback_used=False,
         response_text=response,
@@ -234,13 +367,13 @@ def send_prepared_envelope(
 
     mailbox_delivery = _mailbox_delivery(discovery_provider)
     datagram = encode_forward(header, payload)
-    if mailbox_delivery is not None and envelope.selected_peer_id == forward_path[-1]:
+    if mailbox_delivery is not None and envelope.selected_handle == forward_path[-1]:
         logs = [
-            f"client event=send_prepared_envelope selected={envelope.selected_peer_id or 'none'} "
+            f"client event=send_prepared_envelope selected={envelope.selected_handle or 'none'} "
             f"forward_path={'/'.join(forward_path)} wire=binary via=mailbox"
         ]
         packets = mailbox_delivery(
-            envelope.selected_peer_id,
+            envelope.selected_handle,
             datagram,
             timeout=timeout,
         )
@@ -270,7 +403,7 @@ def send_prepared_envelope(
                 time.sleep(request_repeat_delay)
 
         logs = [
-            f"client event=send_prepared_envelope selected={envelope.selected_peer_id or 'none'} "
+            f"client event=send_prepared_envelope selected={envelope.selected_handle or 'none'} "
             f"forward_path={'/'.join(forward_path)} wire=binary {dial_note} "
             f"request_repeats={request_repeats}"
         ]
@@ -286,6 +419,77 @@ def send_prepared_envelope(
     finally:
         if owns_client_sock:
             client_sock.close()
+
+
+def _prepare_from_match_gossip(
+    *,
+    intent: RouteIntent,
+    control_service,
+    pool_name: str | None,
+    salt: str | None,
+    config: ExpertModeConfig,
+):
+    if control_service is None or pool_name is None or not salt:
+        return None
+    commitment = query_commitment(
+        prompt=intent.prompt,
+        pool_name=pool_name,
+        requested_expertise=intent.requested_expertise,
+        salt=salt,
+    )
+    results = control_service.match_results(
+        pool_name=pool_name,
+        query_commitment=commitment,
+    )
+    for result in results:
+        signed = control_service.get(result.key)
+        if signed is None:
+            continue
+        for candidate in result.candidates:
+            if candidate.cover:
+                continue
+            prepared = prepare_match_result_gossip_request(
+                intent,
+                selected_handle=candidate.handle,
+                matcher_id=result.matcher_id,
+                result_key=result.key,
+                attestation_ref=result.attestation_ref,
+                record_issued_at=signed.record.issued_at,
+                record_expires_at=signed.record.expires_at,
+                config=config,
+            )
+            return prepared, (
+                "client event=match_result_gossip_used source=cached_tee_signed live_tee_match=false "
+                "selection_policy=prefer_signed_cached_tee_absent_reputation "
+                "pool={pool} matcher={matcher} handle={handle} record_key={key} expires_at={expires}".format(
+                    pool=pool_name,
+                    matcher=result.matcher_id,
+                    handle=candidate.handle,
+                    key=result.key,
+                    expires=signed.record.expires_at,
+                ),
+            )
+    return None
+
+
+def _known_mixnode_ids(
+    cluster: ClusterConfig,
+    control_service,
+) -> tuple[str, ...]:
+    node_ids = {
+        node_id
+        for node_id, node in cluster.nodes.items()
+        if node.has_capability(CAPABILITY_MIXNODE)
+        or node.has_capability(CAPABILITY_CONTROL_DHT)
+    }
+    if control_service is not None:
+        peers = getattr(control_service, "mixnode_dht_peers", None)
+        if callable(peers):
+            try:
+                node_ids.update(str(peer.node_id) for peer in peers())
+            except Exception:
+                pass
+    return tuple(sorted(node_id for node_id in node_ids if node_id))
 
 
 def _read_stream_from_socket(
@@ -361,7 +565,7 @@ def _read_stream_from_datagrams(
 
 def _plan_relay_path_from_peer_address(
     *,
-    selected_peer_id: str | None,
+    selected_handle: str | None,
     relay_path: tuple[str, ...],
     peer_address_config: PeerAddressConfig | None,
     peer_address_records: Mapping[str, dict[str, object]],
@@ -372,15 +576,15 @@ def _plan_relay_path_from_peer_address(
 
     logs: list[str] = []
     if (
-        selected_peer_id is None
+        selected_handle is None
         or peer_address_config is None
         or not peer_address_config.enabled
     ):
         return _PeerAddressRouteResult(relay_path=relay_path, logs=tuple(logs))
 
-    raw_record = peer_address_records.get(selected_peer_id)
+    raw_record = peer_address_records.get(selected_handle)
     if raw_record is None:
-        logs.append(f"client event=peer_address_missing peer_id={selected_peer_id}")
+        logs.append(f"client event=peer_address_missing handle={selected_handle}")
         return _PeerAddressRouteResult(relay_path=relay_path, logs=tuple(logs))
 
     record = peer_address_record_from_dict(dict(raw_record))
@@ -393,7 +597,7 @@ def _plan_relay_path_from_peer_address(
     if not trusted_record_relays and not dev_allow_untrusted_reachability_relays:
         reason = "peer_address_untrusted_relay"
         logs.append(
-            f"client event=peer_address_rejected peer_id={selected_peer_id} reason={reason}"
+            f"client event=peer_address_rejected handle={selected_handle} reason={reason}"
         )
         return _PeerAddressRouteResult(
             relay_path=relay_path,
@@ -408,7 +612,7 @@ def _plan_relay_path_from_peer_address(
         if not verified:
             reason = "peer_address_bad_signature"
             logs.append(
-                f"client event=peer_address_rejected peer_id={selected_peer_id} reason={reason}"
+                f"client event=peer_address_rejected handle={selected_handle} reason={reason}"
             )
             return _PeerAddressRouteResult(
                 relay_path=relay_path,
@@ -417,7 +621,7 @@ def _plan_relay_path_from_peer_address(
             )
     elif dev_allow_untrusted_reachability_relays:
         logs.append(
-            f"client event=peer_address_dev_untrusted_allowed peer_id={selected_peer_id}"
+            f"client event=peer_address_dev_untrusted_allowed handle={selected_handle}"
         )
 
     plan = build_dial_plan(
@@ -433,7 +637,7 @@ def _plan_relay_path_from_peer_address(
     if dial_target is None:
         reason = "peer_address_no_trusted_dial_target"
         logs.append(
-            f"client event=peer_address_rejected peer_id={selected_peer_id} reason={reason}"
+            f"client event=peer_address_rejected handle={selected_handle} reason={reason}"
         )
         return _PeerAddressRouteResult(
             relay_path=relay_path,
@@ -442,18 +646,18 @@ def _plan_relay_path_from_peer_address(
         )
     primary_kind = plan.primary.kind if plan.primary else "none"
     logs.append(
-        "client event=peer_address_plan peer_id={peer_id} contactable={contactable} "
+        "client event=peer_address_plan handle={handle} contactable={contactable} "
         "primary={primary} fallback_count={fallback_count}".format(
-            peer_id=selected_peer_id,
+            handle=selected_handle,
             contactable=str(plan.contactable).lower(),
             primary=primary_kind,
             fallback_count=len(plan.fallbacks),
         )
     )
     logs.append(
-        "client event=dial_target peer_id={peer_id} route_kind={route_kind} "
+        "client event=dial_target handle={handle} route_kind={route_kind} "
         "transport={transport} relay_id={relay_id} host={host} port={port}".format(
-            peer_id=selected_peer_id,
+            handle=selected_handle,
             route_kind=dial_target.route_kind,
             transport=dial_target.transport,
             relay_id=dial_target.relay_id or "",
@@ -463,12 +667,12 @@ def _plan_relay_path_from_peer_address(
     )
     for warning in plan.warnings:
         logs.append(
-            f"client event=peer_address_warning peer_id={selected_peer_id} warning={warning!r}"
+            f"client event=peer_address_warning handle={selected_handle} warning={warning!r}"
         )
 
     if relay_path:
         logs.append(
-            f"client event=peer_address_ignored_static_relay_path peer_id={selected_peer_id}"
+            f"client event=peer_address_ignored_static_relay_path handle={selected_handle}"
         )
 
     if dial_target.route_kind != ROUTE_RELAY or not dial_target.relay_id:
@@ -480,8 +684,8 @@ def _plan_relay_path_from_peer_address(
 
     planned = (dial_target.relay_id,)
     logs.append(
-        "client event=peer_address_relay_path peer_id={peer_id} relay_path={path}".format(
-            peer_id=selected_peer_id,
+        "client event=peer_address_relay_path handle={handle} relay_path={path}".format(
+            handle=selected_handle,
             path="/".join(planned),
         )
     )
@@ -499,6 +703,7 @@ def _plan_relay_path_for_mailbox_delivery(
         selected_handle is None
         or peer_address_config is None
         or not peer_address_config.enabled
+        or not bool(getattr(discovery_provider, "mailbox_datagram_delivery_enabled", True))
         or not bool(getattr(discovery_provider, "mailbox_delivery_enabled", False))
     ):
         return None
@@ -516,12 +721,6 @@ def _plan_relay_path_for_mailbox_delivery(
             relay_path=relay_path,
             logs=(f"client event=mailbox_delivery_rejected handle={selected_handle} reason={exc}",),
             blocked_reason=str(exc),
-        )
-    if not planned:
-        return _PeerAddressRouteResult(
-            relay_path=relay_path,
-            logs=(f"client event=mailbox_delivery_rejected handle={selected_handle} reason=no_relay_path",),
-            blocked_reason="mailbox_delivery_no_relay_path",
         )
     if relay_path and relay_path != planned:
         return _PeerAddressRouteResult(
@@ -585,7 +784,7 @@ def _plan_relay_path_from_handle(
             blocked_reason="handle_resolution_mismatch",
         )
     result = _plan_relay_path_from_peer_address(
-        selected_peer_id=selected_handle,
+        selected_handle=selected_handle,
         relay_path=relay_path,
         peer_address_config=peer_address_config,
         peer_address_records={selected_handle: resolution.peer_address},
@@ -621,19 +820,25 @@ def _mailbox_delivery(
 def _routing_node_available(
     cluster: ClusterConfig,
     discovery_provider: DiscoveryProvider,
-    peer_id: str,
+    handle: str,
     *,
     relay_path: tuple[str, ...],
 ) -> bool:
-    if peer_id in cluster.nodes:
-        return True
-    if relay_path and _kem_public_key_hex(discovery_provider, peer_id) is not None:
+    try:
+        require_route_handle(handle, field="routing node")
+    except ProtocolInvariantError:
+        return False
+    if _kem_public_key_hex(discovery_provider, handle) is not None:
         return True
     return False
 
 
 def _kem_public_key_hex(discovery_provider: DiscoveryProvider | None, node_id: str) -> str | None:
     if discovery_provider is None:
+        return None
+    try:
+        require_route_handle(node_id, field="KEM lookup target")
+    except ProtocolInvariantError:
         return None
     getter = getattr(discovery_provider, "routing_kem_pk_hex", None)
     if getter is None:

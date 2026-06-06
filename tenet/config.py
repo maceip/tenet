@@ -1,6 +1,6 @@
 """Shared configuration schema for tenet daemons.
 
-This module is intentionally dependency-free. It gives the client, relay,
+This module is intentionally dependency-free. It gives the client, mixnode,
 expert, gateway, and directory daemons one JSON-shaped config contract without
 pulling daemon logic into packet processing.
 """
@@ -13,15 +13,40 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from tenet.schema import normalize_schema, supports_schema
 
-CONFIG_VERSION = "por.config.v1"
+
+CONFIG_VERSION = "tenet.config.2026-06"
 
 ROLE_CLIENT = "client"
-ROLE_RELAY = "relay"
+ROLE_MIXNODE = "mixnode"
+LEGACY_ROLE_RELAY = "relay"
+ROLE_RELAY = ROLE_MIXNODE
 ROLE_EXPERT = "expert"
 ROLE_GATEWAY = "gateway"
 ROLE_DIRECTORY = "directory"
 VALID_ROLES = {ROLE_CLIENT, ROLE_RELAY, ROLE_EXPERT, ROLE_GATEWAY, ROLE_DIRECTORY}
+
+CAPABILITY_CLIENT = "client"
+CAPABILITY_MIXNODE = "mixnode"
+CAPABILITY_EXPERT = "expert"
+CAPABILITY_REACHABILITY_RELAY = "reachability_relay"
+CAPABILITY_CONTROL_DHT = "control_dht"
+CAPABILITY_MATCHER = "matcher"
+CAPABILITY_MAILBOX = "mailbox"
+CAPABILITY_TEE = "tee"
+CAPABILITY_DIRECTORY = "directory"
+VALID_NODE_CAPABILITIES = {
+    CAPABILITY_CLIENT,
+    CAPABILITY_MIXNODE,
+    CAPABILITY_EXPERT,
+    CAPABILITY_REACHABILITY_RELAY,
+    CAPABILITY_CONTROL_DHT,
+    CAPABILITY_MATCHER,
+    CAPABILITY_MAILBOX,
+    CAPABILITY_TEE,
+    CAPABILITY_DIRECTORY,
+}
 
 TRANSPORT_UDP = "udp"
 TRANSPORT_QUIC_H3 = "quic_h3"
@@ -38,6 +63,17 @@ DEFAULT_CIRCUIT_TTL_SECONDS = 120
 DEFAULT_MAX_DATAGRAM_FRAME_SIZE = 1200
 DEFAULT_MAX_FRAME_SIZE = 1_048_576
 DEFAULT_RECEIVE_QUEUE_SIZE = 1024
+DEFAULT_CONTROL_SYNC_PREFIXES = (
+    "trust/",
+    "mixnode/",
+    "pool/",
+    "client/",
+    "name/",
+    "match/",
+    "expert/",
+    "topic/",
+    "review/",
+)
 
 
 @dataclass(frozen=True)
@@ -139,20 +175,23 @@ class ClusterNodeConfig:
     port: int
     kem_pk_hex: str
     kem_sk_hex: str = ""
-    role: str = "relay"
+    role: str = ROLE_MIXNODE
+    capabilities: tuple[str, ...] = (CAPABILITY_MIXNODE, CAPABILITY_CONTROL_DHT)
 
     def __post_init__(self) -> None:
         self.validate()
 
     @classmethod
     def from_dict(cls, node_id: str, raw: Mapping[str, object]) -> "ClusterNodeConfig":
+        role = _normalize_role(str(raw.get("role", ROLE_MIXNODE)))
         return cls(
             node_id=str(raw.get("node_id", node_id)),
             host=str(raw.get("host", DEFAULT_HOST)),
             port=int(raw.get("port", DEFAULT_PORT)),
             kem_pk_hex=str(raw.get("kem_pk_hex", raw.get("kem_pk", ""))),
             kem_sk_hex=str(raw.get("kem_sk_hex", raw.get("kem_sk", ""))),
-            role=str(raw.get("role", ROLE_RELAY)),
+            role=role,
+            capabilities=_capabilities_from_raw(raw.get("capabilities"), role),
         )
 
     def validate(self) -> "ClusterNodeConfig":
@@ -164,9 +203,13 @@ class ClusterNodeConfig:
             raise ValueError("node port must be 0..65535")
         if not self.kem_pk_hex:
             raise ValueError("kem_pk_hex is required")
-        if self.role not in {ROLE_RELAY, ROLE_EXPERT, "any"}:
+        if self.role not in {ROLE_MIXNODE, ROLE_EXPERT, "any"}:
             raise ValueError(f"unsupported cluster node role: {self.role}")
+        _validate_capabilities(self.capabilities)
         return self
+
+    def has_capability(self, capability: str) -> bool:
+        return capability in self.capabilities
 
     def to_legacy_dict(self) -> dict[str, object]:
         return {
@@ -175,6 +218,7 @@ class ClusterNodeConfig:
             "kem_pk": self.kem_pk_hex,
             "kem_sk": self.kem_sk_hex,
             "role": self.role,
+            "capabilities": list(self.capabilities),
         }
 
 
@@ -666,9 +710,69 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class ControlPlaneConfig:
+    enabled: bool = True
+    store_path: str | None = None
+    bootstrap_path: str | None = None
+    verify_keys: dict[str, str] = field(default_factory=dict)
+    threshold: int = 1
+    anti_entropy_interval_seconds: float = 0.0
+    sync_prefixes: tuple[str, ...] = DEFAULT_CONTROL_SYNC_PREFIXES
+    replication_factor: int = 5
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object] | None) -> "ControlPlaneConfig":
+        raw = raw or {}
+        verify_raw = _mapping_or_none(raw.get("verify_keys")) or {}
+        prefixes_raw = raw.get("sync_prefixes")
+        if prefixes_raw is None:
+            prefixes_raw = DEFAULT_CONTROL_SYNC_PREFIXES
+        if isinstance(prefixes_raw, str):
+            prefixes = (prefixes_raw,)
+        else:
+            prefixes = tuple(str(item) for item in prefixes_raw)
+        return cls(
+            enabled=_bool(raw.get("enabled", True)),
+            store_path=_optional_str(raw.get("store_path")),
+            bootstrap_path=_optional_str(raw.get("bootstrap_path")),
+            verify_keys={str(key): str(value) for key, value in verify_raw.items()},
+            threshold=int(raw.get("threshold", 1)),
+            anti_entropy_interval_seconds=float(
+                raw.get("anti_entropy_interval_seconds", 0.0)
+            ),
+            sync_prefixes=prefixes,
+            replication_factor=int(raw.get("replication_factor", 5)),
+        )
+
+    def validate(self) -> "ControlPlaneConfig":
+        if self.threshold < 1:
+            raise ValueError("control.threshold must be positive")
+        if self.anti_entropy_interval_seconds < 0:
+            raise ValueError("control.anti_entropy_interval_seconds must be non-negative")
+        if self.replication_factor < 1:
+            raise ValueError("control.replication_factor must be positive")
+        if not self.sync_prefixes:
+            raise ValueError("control.sync_prefixes must not be empty")
+        if any(not prefix for prefix in self.sync_prefixes):
+            raise ValueError("control.sync_prefixes entries must be non-empty")
+        for key_id, key_hex in self.verify_keys.items():
+            if not key_id:
+                raise ValueError("control verify key id is required")
+            try:
+                bytes.fromhex(key_hex)
+            except ValueError as exc:
+                raise ValueError("control verify keys must be hex") from exc
+        return self
+
+
+@dataclass(frozen=True)
 class DaemonConfig:
     node_id: str
     role: str
+    capabilities: tuple[str, ...] = ()
     kem_pk_hex: str | None = None
     kem_sk_hex: str | None = None
     transport: TransportConfig = field(default_factory=TransportConfig)
@@ -681,6 +785,7 @@ class DaemonConfig:
     supernode: SupernodeConfig = field(default_factory=SupernodeConfig)
     reach_registration: ReachRegistrationConfig = field(default_factory=ReachRegistrationConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    control: ControlPlaneConfig = field(default_factory=ControlPlaneConfig)
     peers: dict[str, PeerEndpointConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -689,11 +794,12 @@ class DaemonConfig:
     @classmethod
     def from_dict(cls, raw: Mapping[str, object]) -> "DaemonConfig":
         node_id = str(raw.get("node_id", ""))
-        role = str(raw.get("role", ""))
+        role = _normalize_role(str(raw.get("role", "")))
         peers_raw = _mapping_or_none(raw.get("peers")) or {}
         return cls(
             node_id=node_id,
             role=role,
+            capabilities=_capabilities_from_raw(raw.get("capabilities"), role),
             kem_pk_hex=_optional_str(raw.get("kem_pk_hex") or raw.get("kem_pk")),
             kem_sk_hex=_optional_str(raw.get("kem_sk_hex") or raw.get("kem_sk")),
             transport=TransportConfig.from_dict(_mapping_or_none(raw.get("transport"))),
@@ -712,6 +818,7 @@ class DaemonConfig:
                 _mapping_or_none(raw.get("reach_registration"))
             ),
             logging=LoggingConfig.from_dict(_mapping_or_none(raw.get("logging"))),
+            control=ControlPlaneConfig.from_dict(_mapping_or_none(raw.get("control"))),
             peers={
                 str(peer_id): PeerEndpointConfig.from_dict(str(peer_id), _mapping_or_empty(peer_raw))
                 for peer_id, peer_raw in peers_raw.items()
@@ -723,6 +830,7 @@ class DaemonConfig:
             raise ValueError("node_id is required")
         if self.role not in VALID_ROLES:
             raise ValueError(f"unsupported daemon role: {self.role}")
+        _validate_capabilities(self.capabilities)
         self.transport.validate()
         self.packet.validate()
         self.directory.validate()
@@ -734,6 +842,7 @@ class DaemonConfig:
         self.supernode.validate()
         self.reach_registration.validate()
         self.logging.validate()
+        self.control.validate()
         for peer in self.peers.values():
             peer.validate()
         return self
@@ -741,8 +850,15 @@ class DaemonConfig:
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
+    def has_capability(self, capability: str) -> bool:
+        return capability in self.capabilities
+
     def cluster_node(self) -> ClusterNodeConfig:
-        if self.role not in {ROLE_RELAY, ROLE_EXPERT}:
+        if not (
+            self.has_capability(CAPABILITY_MIXNODE)
+            or self.has_capability(CAPABILITY_EXPERT)
+            or self.has_capability(CAPABILITY_CONTROL_DHT)
+        ):
             raise ValueError(f"{self.node_id} role {self.role!r} is not a cluster node")
         if not self.kem_pk_hex or not self.kem_sk_hex:
             raise ValueError(f"{self.node_id} requires kem_pk_hex and kem_sk_hex")
@@ -754,6 +870,7 @@ class DaemonConfig:
             kem_pk_hex=self.kem_pk_hex,
             kem_sk_hex=self.kem_sk_hex,
             role=self.role,
+            capabilities=self.capabilities,
         )
 
 
@@ -784,13 +901,13 @@ class PorConfig:
             for node_id, value in daemons_raw.items()
         }
         return cls(
-            version=str(raw.get("version", CONFIG_VERSION)),
+            version=normalize_schema(str(raw.get("version", CONFIG_VERSION)), CONFIG_VERSION),
             daemons=daemons,
             default_node_id=_optional_str(raw.get("default_node_id")),
         ).validate()
 
     def validate(self) -> "PorConfig":
-        if self.version != CONFIG_VERSION:
+        if not supports_schema(self.version, CONFIG_VERSION):
             raise ValueError(f"unsupported config version: {self.version}")
         if not self.daemons:
             raise ValueError("at least one daemon config is required")
@@ -834,10 +951,14 @@ class PorConfig:
         nodes = {
             daemon.node_id: daemon.cluster_node()
             for daemon in self.daemons.values()
-            if daemon.role in {ROLE_RELAY, ROLE_EXPERT}
+            if (
+                daemon.has_capability(CAPABILITY_MIXNODE)
+                or daemon.has_capability(CAPABILITY_EXPERT)
+                or daemon.has_capability(CAPABILITY_CONTROL_DHT)
+            )
         }
         if not nodes:
-            raise ValueError("por.config.v1 cluster view requires at least one relay or expert daemon")
+            raise ValueError(f"{CONFIG_VERSION} cluster view requires at least one mixnode or expert daemon")
         return ClusterConfig(
             params=packet_source.packet,
             client=client.transport.bind if client else EndpointConfig(),
@@ -851,7 +972,12 @@ class PorConfig:
         return json.dumps(self.to_dict(), sort_keys=True, indent=2)
 
     def supernode_directory_records(self) -> tuple[dict[str, object], ...]:
-        """Return public supernode advertisements implied by daemon config."""
+        """Return public reachability-assist advertisements implied by config.
+
+        Runtime roles and local capability flags are intentionally not
+        serialized here. The public record only exposes enough to bootstrap a
+        protected reachability-assist contact.
+        """
 
         records: list[dict[str, object]] = []
         for daemon in self.daemons.values():
@@ -863,17 +989,13 @@ class PorConfig:
             records.append(
                 {
                     "node_id": daemon.node_id,
-                    "role": daemon.role,
                     "public_ip": supernode.public_ip,
-                    "relay_handle": f"{daemon.node_id}@{public_host}:{bind.port}",
+                    "reachability_handle": f"{daemon.node_id}@{public_host}:{bind.port}",
                     "endpoint": {
                         "host": public_host,
                         "port": bind.port,
                         "transport": daemon.transport.kind,
                     },
-                    "advertise_relay": supernode.advertise_relay,
-                    "accept_inbound_mix": supernode.accept_inbound_mix,
-                    "promote_expert": supernode.promote_expert,
                 }
             )
         return tuple(records)
@@ -951,3 +1073,42 @@ def _mutable_mapping_copy(value: object) -> dict[str, object]:
     if not isinstance(value, Mapping):
         raise TypeError("expected mapping")
     return dict(value)
+
+
+def _normalize_role(value: str) -> str:
+    text = value.strip().lower()
+    if text == LEGACY_ROLE_RELAY:
+        return ROLE_MIXNODE
+    return text
+
+
+def _default_capabilities_for_role(role: str) -> tuple[str, ...]:
+    if role == ROLE_CLIENT:
+        return (CAPABILITY_CLIENT,)
+    if role == ROLE_EXPERT:
+        return (CAPABILITY_MIXNODE, CAPABILITY_CONTROL_DHT, CAPABILITY_EXPERT)
+    if role == ROLE_MIXNODE:
+        return (CAPABILITY_MIXNODE, CAPABILITY_CONTROL_DHT)
+    if role == ROLE_DIRECTORY:
+        return (CAPABILITY_DIRECTORY,)
+    return ()
+
+
+def _capabilities_from_raw(value: object, role: str) -> tuple[str, ...]:
+    if value is None:
+        return _default_capabilities_for_role(role)
+    if isinstance(value, str):
+        capabilities = (value,) if value else ()
+    elif isinstance(value, Sequence):
+        capabilities = tuple(str(item) for item in value)
+    else:
+        raise TypeError("capabilities must be a string sequence")
+    normalized = tuple(dict.fromkeys(item.strip().lower() for item in capabilities if item))
+    _validate_capabilities(normalized)
+    return normalized
+
+
+def _validate_capabilities(capabilities: Sequence[str]) -> None:
+    invalid = sorted(set(capabilities) - VALID_NODE_CAPABILITIES)
+    if invalid:
+        raise ValueError("unsupported node capabilities: " + ", ".join(invalid))

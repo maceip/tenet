@@ -151,6 +151,8 @@ def _candidate_to_dict(candidate: PeerCandidate) -> dict[str, object]:
         "observation": (
             asdict(candidate.observation) if candidate.observation is not None else None
         ),
+        "route_handle": candidate.route_handle,
+        "publisher_id": candidate.publisher_id,
     }
 
 
@@ -165,4 +167,13 @@ def _candidate_from_dict(raw: dict[str, object]) -> PeerCandidate:
     return PeerCandidate(
         MemoryManifest.from_json(json.dumps(manifest_raw)),
         observation,
+        route_handle=_optional_str(raw.get("route_handle")),
+        publisher_id=_optional_str(raw.get("publisher_id")),
     )
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None

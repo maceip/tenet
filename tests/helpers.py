@@ -164,7 +164,7 @@ def parse_json_log_events(text: str) -> list[dict[str, object]]:
             item = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if item.get("schema") == "por.log.v1" and "event" in item:
+        if item.get("schema") == "tenet.log.2026-06" and "event" in item:
             events.append(item)
     return events
 

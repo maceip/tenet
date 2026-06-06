@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser(
         "run",
-        help="Run from a tenet daemon JSON (compat schema: por.config.v1).",
+        help="Run from a tenet daemon JSON (compat schema: tenet.config.2026-06).",
     )
     run.add_argument("--config", required=True, help="tenet daemon JSON path")
     run.add_argument("--node-id", help="Daemon node id when config lists multiple")
@@ -74,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     enclave_check.add_argument(
         "--config",
         default="config/live-enclave.json",
-        help="Live enclave JSON path (compat schema: por.live_enclave.v1)",
+        help="Live enclave JSON path (compat schema: tenet.live_enclave.2026-06)",
     )
     enclave_check.add_argument("--json", action="store_true", help="Print JSON summary")
 
@@ -109,6 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enclave_send.add_argument("--prompt", required=True)
     enclave_send.add_argument("--expertise")
+    enclave_send.add_argument(
+        "--name",
+        help="Tenet service name, for example monet.expert~tenet; resolves inside the mixnet control plane.",
+    )
     enclave_send.add_argument("--timeout", type=float, default=120.0)
     enclave_send.add_argument(
         "--via-mailbox",
@@ -131,6 +135,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask.add_argument("--prompt", required=True)
     ask.add_argument("--expertise")
+    ask.add_argument(
+        "--name",
+        help="Tenet service name, for example monet.expert~tenet; resolves inside the mixnet control plane.",
+    )
     ask.add_argument("--timeout", type=float, default=120.0)
     ask.add_argument(
         "--via-mailbox",
@@ -278,7 +286,7 @@ def _run_enclave_command(args: argparse.Namespace) -> int:
             print(
                 "enclave plan ok "
                 f"use_expert={result['use_expert']} "
-                f"selected={result['selected_peer_id']} "
+                f"selected={result.get('selected_handle') or result['selected_peer_id']} "
                 f"pool={result['pool_tier']} "
                 f"candidates={result['candidate_count']}"
             )
@@ -293,6 +301,7 @@ def _run_enclave_command(args: argparse.Namespace) -> int:
             mailbox,
             prompt=args.prompt,
             requested_expertise=args.expertise,
+            service_name=args.name,
             timeout=args.timeout,
             mailbox_datagram_delivery_enabled=True if args.via_mailbox else None,
         )
@@ -301,7 +310,7 @@ def _run_enclave_command(args: argparse.Namespace) -> int:
         else:
             print(
                 "enclave send "
-                f"ok={result['ok']} selected={result['selected_peer_id']} "
+                f"ok={result['ok']} selected={result.get('selected_handle') or result['selected_peer_id']} "
                 f"via_mailbox={result['via_mailbox']} "
                 f"response={result['response_text']!r}"
             )
@@ -336,8 +345,10 @@ def _run_ask_command(args: argparse.Namespace) -> int:
             mailbox,
             prompt=args.prompt,
             requested_expertise=args.expertise,
+            service_name=args.name,
             timeout=args.timeout,
             mailbox_datagram_delivery_enabled=True if args.via_mailbox else None,
+            control_service=pack.to_control_service(),
         )
     display.finish(result)
     if args.json:

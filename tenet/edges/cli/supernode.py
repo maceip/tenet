@@ -330,6 +330,13 @@ def run_supernode_cluster(daemon: DaemonConfig, por_config: PorConfig) -> int:
         daemon.node_id,
         role="relay",
         logging=daemon.logging,
+        control_store_path=daemon.control.store_path,
+        control_bootstrap_path=daemon.control.bootstrap_path,
+        control_verify_keys=daemon.control.verify_keys,
+        control_threshold=daemon.control.threshold,
+        control_anti_entropy_interval_seconds=daemon.control.anti_entropy_interval_seconds,
+        control_sync_prefixes=daemon.control.sync_prefixes,
+        control_replication_factor=daemon.control.replication_factor,
     )
     relay_secret = None
     if daemon.supernode.relay_secret_hex:

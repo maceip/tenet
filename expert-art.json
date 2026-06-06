@@ -1,0 +1,27 @@
+{
+  "version": "por.peer_address_record.v1",
+  "peer_id": "expert-art",
+  "relay_candidates": [
+    {
+      "relay_id": "relay",
+      "endpoint": {
+        "host": "127.0.0.1",
+        "port": 7530
+      },
+      "transport": "quic_datagram",
+      "inline_required": true
+    }
+  ],
+  "observed_udp_endpoints": [],
+  "nat_hints": [],
+  "supported_transports": [
+    "quic_datagram"
+  ],
+  "issued_at": 1780707582.408289,
+  "expires_at": 1780707852.408289,
+  "address_policy": {
+    "expose_direct_endpoint": false,
+    "stable_relay_only": true
+  },
+  "signature": "4d04cefa1e021e5be16bb362a7abe513ec42244002fac08ebf6880dcd64d283a"
+}

@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
-TOPOLOGY_VERSION = "por.gate_b_topology.v1"
+from tenet.schema import normalize_schema, supports_schema
+
+TOPOLOGY_VERSION = "tenet.gate_b_topology.2026-06"
 DEFAULT_TOPOLOGY_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "gate-b-topology.json"
 
 
@@ -61,7 +63,7 @@ class GateBTopology:
         return self.experts[0]
 
     def validate(self) -> GateBTopology:
-        if self.version != TOPOLOGY_VERSION:
+        if not supports_schema(self.version, TOPOLOGY_VERSION):
             raise ValueError(f"unsupported topology version: {self.version!r}")
         if not self.experts:
             raise ValueError("topology must include at least one expert node")
@@ -117,7 +119,7 @@ class GateBTopology:
             experts.append(_expert_from_dict(_role("expert")))
 
         topo = cls(
-            version=str(raw.get("version", "")),
+            version=normalize_schema(str(raw.get("version", "")), TOPOLOGY_VERSION),
             reach_relay=RoleHost(
                 host=str(relay_raw["host"]),
                 ssh_user=str(relay_raw.get("ssh_user", "ec2-user")),

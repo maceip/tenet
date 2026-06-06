@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# Legacy filename. Deploy the current single-expert beta path on existing AWS infra
-# (relay on Nitro host + expert on this machine). See STATUS.md items 11–13.
+# Gate-b / network-beta live deployment helper (AWS Nitro + local expert).
+#
+# OUTDATED / LEGACY note (2026):
+# The core now has a single WireNodeRuntime, real library-backed Kademlia for the
+# control overlay (network-scoped DHT keys, mesh-ready publish, republish of
+# persisted records on restart, size bounds, etc.), and a flexible simulator
+# (sim/) that supports the five deployment shapes using deploy/Dockerfile.node.
+#
+# This script is kept for the specific "beta path on existing Nitro + laptop"
+# live setup. When launching nodes it still works via the tenet CLI / runtime,
+# but new simulation or containerized work should go through `sim/`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

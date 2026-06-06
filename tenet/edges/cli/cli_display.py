@@ -153,7 +153,7 @@ class AskDisplay:
         if not self.enabled:
             return
         ok = bool(result.get("ok"))
-        selected = str(result.get("selected_peer_id") or "none")
+        selected = str(result.get("selected_handle") or result.get("selected_peer_id") or "none")
         via_mailbox = bool(result.get("via_mailbox"))
         degraded = bool(result.get("degraded_anonymity"))
         color = GREEN if ok else RED

@@ -1,5 +1,5 @@
 {
-  "version": "por.gate_b_topology.v1",
+  "version": "tenet.gate_b_topology.2026-06",
   "description": "Network-beta real nodes. experts[] must be on hosts different from reach_relay.host.",
   "roles": {
     "reach_relay": {

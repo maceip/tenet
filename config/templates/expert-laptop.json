@@ -1,5 +1,5 @@
 {
-  "version": "por.config.v1",
+  "version": "tenet.config.2026-06",
   "default_node_id": "REPLACE_WITH_OPAQUE_HANDLE",
   "daemons": {
     "REPLACE_WITH_OPAQUE_HANDLE": {

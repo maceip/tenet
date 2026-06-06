@@ -1,5 +1,5 @@
 {
-  "schema": "por.live_mailbox_client.v1",
+  "schema": "tenet.live_mailbox_client.2026-06",
   "description": "Client cluster for the current alpha/beta path via trusted public reachability relay.",
   "params": {
     "payload_size": 2048,

@@ -17,6 +17,7 @@ from tenet.config import ClusterConfig, DaemonConfig, LoggingConfig, PorConfig
 from tenet.experts.directory import load_public_snapshot_directory
 from tenet.experts.expert_mode import ExpertModeConfig
 from tenet.log_events import PorLogEvent, emit_log_event
+from tenet.mixnet.control import ControlBootstrap, PersistentControlStore, sync_control_from_cluster
 
 
 ClientRunner = Callable[..., ClientRunResult]
@@ -48,11 +49,13 @@ class PersistentClientSession:
         daemon: DaemonConfig,
         cluster: ClusterConfig,
         discovery_provider,
+        control_service=None,
         runner: ClientRunner = run_client_once,
     ) -> None:
         self.daemon = daemon
         self.cluster = cluster
         self.discovery_provider = discovery_provider
+        self.control_service = control_service
         self.runner = runner
         self.session_id = uuid4().hex
         self.started_at = datetime.now(timezone.utc).isoformat()
@@ -78,6 +81,7 @@ class PersistentClientSession:
             daemon=daemon,
             cluster=por_config.to_cluster_config(client_node_id=daemon.node_id),
             discovery_provider=load_public_snapshot_directory(directory_source),
+            control_service=_control_service_from_daemon(daemon),
             runner=runner,
         )
 
@@ -147,6 +151,20 @@ class PersistentClientSession:
                 on_chunk(chunk)
 
         try:
+            if self.control_service is not None:
+                synced = sync_control_from_cluster(
+                    self.control_service,
+                    self.cluster,
+                    prefixes=self.daemon.control.sync_prefixes,
+                )
+                if synced:
+                    _emit_client_log(
+                        self.daemon.logging,
+                        "control_live_sync",
+                        node_id=self.daemon.node_id,
+                        request_id=request_id,
+                        fields={"records": synced},
+                    )
             result = self.runner(
                 cluster=self.cluster,
                 discovery_provider=self.discovery_provider,
@@ -163,6 +181,7 @@ class PersistentClientSession:
                 ),
                 provider_config=self.daemon.provider,
                 on_chunk=wrapped_chunk,
+                control_service=self.control_service,
             )
         except Exception as exc:
             with self._lock:
@@ -228,8 +247,8 @@ def run_send(
     _emit_client_log(
         logging,
         "client_request_complete",
-        peer_id=result.selected_peer_id,
         fields={
+            "selected_handle": result.selected_handle,
             "fallback_used": result.fallback_used,
             "degraded_anonymity": result.degraded_anonymity,
         },
@@ -243,8 +262,27 @@ def run_send(
     return 0
 
 
+def _control_service_from_daemon(daemon: DaemonConfig):
+    """Build the client's trusted control view from explicit bootstrap config.
+
+    A missing bootstrap returns ``None`` so name/control routing fails closed
+    instead of inventing an empty local authority.
+    """
+
+    if not daemon.control.enabled or not daemon.control.bootstrap_path:
+        return None
+    store = (
+        PersistentControlStore(daemon.control.store_path)
+        if daemon.control.store_path
+        else None
+    )
+    return ControlBootstrap.load(daemon.control.bootstrap_path).to_control_service(
+        store=store,
+    )
+
+
 def run_client_from_daemon(daemon: DaemonConfig, por_config: PorConfig) -> int:
-    """Run client role from one por.config.v1 file."""
+    """Run client role from one tenet.config.2026-06 file."""
 
     if daemon.client.local_http.enabled:
         return run_local_http_client(daemon, por_config)
@@ -268,8 +306,8 @@ def run_client_from_daemon(daemon: DaemonConfig, por_config: PorConfig) -> int:
         daemon.logging,
         "client_request_complete",
         node_id=daemon.node_id,
-        peer_id=result.selected_peer_id,
         fields={
+            "selected_handle": result.selected_handle,
             "fallback_used": result.fallback_used,
             "degraded_anonymity": result.degraded_anonymity,
         },
@@ -416,6 +454,7 @@ def make_client_http_handler(
             message = {
                 "request_id": request_id,
                 "response": result.response_text,
+                "selected_handle": result.selected_handle,
                 "selected_peer_id": result.selected_peer_id,
                 "fallback_used": result.fallback_used,
                 "degraded_anonymity": result.degraded_anonymity,
@@ -493,7 +532,7 @@ def _health_payload(daemon: DaemonConfig, session: PersistentClientSession) -> d
 def _status_payload(daemon: DaemonConfig, session: PersistentClientSession) -> dict[str, object]:
     stats = session.stats
     return {
-        "schema": "por.client_status.v1",
+        "schema": "tenet.client_status.2026-06",
         "node_id": daemon.node_id,
         "role": daemon.role,
         "local_http": {

@@ -1,0 +1,82 @@
+# Two-laptops mixed scenario (Mode 2).
+#
+# Same *logical* fleet as all-local-docker-small.yaml, but realized across
+# two physical machines (your laptop + a colleague's / second laptop).
+#
+# Steps to run:
+# 1. On both laptops, install Docker + add your user to the docker group.
+# 2. (Strongly recommended) Both join the same Tailscale (or WireGuard) mesh.
+#    Use the Tailscale IPs as external_host below — UDP just works, no port
+#    forwarding headaches.
+# 3. On the "control" laptop (where you run the sim command), ensure you have
+#    passwordless SSH to the second laptop (ssh-copy-id or agent).
+# 4. Edit the ssh + external_host values for the "office" site.
+# 5. From the control laptop:
+#      uv run python -m sim up sim/scenarios/two-laptops.yaml --netem --wait
+#
+# The orchestrator will:
+# - Build (or reuse) the tenet-node image locally.
+# - `docker save | ssh <office> docker load`
+# - Launch the nodes assigned to "home" via local docker.
+# - Launch the nodes assigned to "office" via ssh docker run (with published
+#   ports or host networking as configured).
+# - Apply netem on *both* ends for the declared home<->office link profile.
+#
+# After up you can still run workloads, chaos (partition will work across the
+# real network), etc. The control plane (Kademlia) and data plane (mixnet) run
+# over the real (emulated) cross-laptop link.
+
+network_id: "sim-core-2026-06"
+
+mixnet:
+  payload_size: 2048
+  routing_size: 16
+  max_hops: 5
+
+sites:
+  home:
+    runner: local-docker
+  office:
+    runner: ssh-docker
+    # CHANGE THESE for your environment:
+    ssh: "alice@100.64.0.42"          # Tailscale or LAN IP of the second laptop
+    external_host: "100.64.0.42"      # What "home" nodes will use as seed / dial target for office nodes
+
+links:
+  - from: home
+    to: office
+    latency_ms: 12
+    loss_percent: 0.2
+    jitter_ms: 2
+
+# The rest of the fleet is identical to the all-local example.
+# Only placement + site runner changes — this is the power of the model.
+nodes:
+  - id: dht-home-1
+    placement: home
+    capabilities: [control_dht, mixnode]
+    persist: true
+  - id: dht-far-1
+    placement: office
+    capabilities: [control_dht, mixnode]
+    persist: true
+  - id: relay-home-1
+    placement: home
+    capabilities: [mixnode]
+  - id: relay-far-1
+    placement: office
+    capabilities: [mixnode]
+  - id: expert-demo
+    placement: office
+    capabilities: [expert, mixnode]
+    seeds:
+      pool: "pool~demo~tenet"
+
+workloads:
+  - name: basic-mixnet-roundtrip
+    type: mixnet_client
+    placement: home
+    target: "pool~demo~tenet"
+    count: 3
+    expect_success: true
+    timeout_s: 30.0

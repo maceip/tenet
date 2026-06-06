@@ -21,6 +21,9 @@ RUN dnf install -y python3 && dnf clean all
 # it into the quote, generates the attested-TLS keypair *inside* the enclave, and
 # serves over vsock. Built from the runcards/bountynet-genesis tree; supplied as
 # a build artifact named `bountynet-bin` in the build context.
+#
+# Modernization note: the general-purpose node container image (for the mixnet
+# data plane + real Kademlia control overlay used by sim/) is deploy/Dockerfile.node.
 COPY bountynet-bin /usr/local/bin/bountynet
 
 # The matcher/mailbox application code + its loopback launcher.

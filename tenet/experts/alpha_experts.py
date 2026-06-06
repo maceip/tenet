@@ -19,8 +19,9 @@ from typing import Iterable, Iterator, Mapping, Sequence
 from tenet.experts.directory import DIRECTORY_SNAPSHOT_VERSION, PeerRecord
 from tenet.experts.expert_groups import assign_expert_group, build_expert_population_index
 from tenet.experts.memory_index import IndexConfig, build_memory_index
+from tenet.schema import supports_schema
 
-ALPHA_POPULATION_VERSION = "por.alpha_population.v1"
+ALPHA_POPULATION_VERSION = "tenet.alpha_population.2026-06"
 DEFAULT_LOG_ROOTS = (
     Path.home() / ".cursor" / "projects",
 )
@@ -323,7 +324,7 @@ def write_alpha_population(population: AlphaPopulation, path: Path | str) -> Pat
 
 def load_alpha_population(path: Path | str) -> AlphaPopulation:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    if raw.get("version") != ALPHA_POPULATION_VERSION:
+    if not supports_schema(str(raw.get("version", "")), ALPHA_POPULATION_VERSION):
         raise ValueError(f"unsupported alpha population version: {raw.get('version')!r}")
     experts = []
     for item in raw.get("experts", []):

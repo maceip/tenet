@@ -1,0 +1,17 @@
+# Ignore heavy/unneeded things for node image builds (both client-sim and node)
+.git
+.gitignore
+*.md
+**/__pycache__/
+**/*.pyc
+.venv/
+venv/
+build/
+dist/
+oblivious-core/
+deploy/eif-build/
+deploy/data/
+*.egg-info/
+.pytest_cache/
+.coverage
+node_modules/
