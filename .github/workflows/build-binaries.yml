@@ -1,0 +1,83 @@
+name: build-binaries
+
+# Builds the single-file `por` (tenet) node binary for each shipped platform.
+# Desktop targets use PyInstaller via scripts/build_binary.py. The Android
+# target is an aarch64-Linux binary that runs on Android under Termux; a
+# packaged APK is a separate effort, blocked on Android wheels for the native
+# crypto dependencies (see the `android` job notes below).
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest pytest-cov
+      - name: Run suite
+        run: pytest -q --cov=por
+
+  build:
+    name: ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-arm64
+          - os: windows-latest
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build binary
+        run: python scripts/build_binary.py --name por-${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: por-${{ matrix.target }}
+          path: dist/por-${{ matrix.target }}*
+          if-no-files-found: error
+
+  android:
+    # aarch64-Linux build: runs on Android under Termux (Linux userspace).
+    # A native APK additionally needs Android-targeted wheels for the native
+    # crypto dependencies (pynacl, aioquic, pqcrypto), which are not yet
+    # available — tracked separately. This job is intentionally non-blocking.
+    name: android-aarch64 (termux)
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build aarch64 binary
+        run: python scripts/build_binary.py --name por-android-aarch64
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: por-android-aarch64
+          path: dist/por-android-aarch64*
+          if-no-files-found: error

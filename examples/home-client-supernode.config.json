@@ -1,0 +1,76 @@
+{
+  "version": "por.config.v1",
+  "default_node_id": "client-home",
+  "daemons": {
+    "client-home": {
+      "role": "client",
+      "transport": {
+        "host": "127.0.0.1",
+        "port": 0
+      },
+      "packet": {
+        "payload_size": 2048,
+        "routing_size": 16,
+        "max_hops": 5
+      },
+      "directory": {
+        "snapshot_path": "examples/directory-snapshot.json"
+      },
+      "client": {
+        "directory_snapshot": "http://127.0.0.1:8765/snapshot",
+        "trusted_reachability_relays": [
+          {
+            "relay_id": "bootstrap-1",
+            "host": "203.0.113.10",
+            "port": 4433,
+            "verify_key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+          }
+        ],
+        "local_http": {
+          "enabled": true,
+          "bind": {
+            "host": "127.0.0.1",
+            "port": 8766
+          },
+          "path": "/v1/expert",
+          "status_path": "/v1/status"
+        }
+      },
+      "peer_address": {
+        "enabled": true
+      }
+    },
+    "bootstrap-1": {
+      "role": "relay",
+      "transport": {
+        "kind": "udp",
+        "host": "0.0.0.0",
+        "port": 4433
+      },
+      "packet": {
+        "payload_size": 2048,
+        "routing_size": 16,
+        "max_hops": 5
+      },
+      "kem_pk": "0101010101010101010101010101010101010101010101010101010101010101",
+      "kem_sk": "0202020202020202020202020202020202020202020202020202020202020202",
+      "supernode": {
+        "enabled": true,
+        "public_ip": "203.0.113.10",
+        "advertise_relay": true,
+        "register_directory": true,
+        "accept_inbound_mix": true
+      }
+    },
+    "directory-a": {
+      "role": "directory",
+      "transport": {
+        "host": "127.0.0.1",
+        "port": 8765
+      },
+      "directory": {
+        "snapshot_path": "examples/directory-snapshot.json"
+      }
+    }
+  }
+}
