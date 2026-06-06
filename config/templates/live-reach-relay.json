@@ -1,0 +1,34 @@
+{
+  "version": "por.config.v1",
+  "default_node_id": "@REACH_RELAY_ID@",
+  "daemons": {
+    "@REACH_RELAY_ID@": {
+      "role": "relay",
+      "node_id": "@REACH_RELAY_ID@",
+      "kem_pk_hex": "@RELAY_KEM_PK_HEX@",
+      "kem_sk_hex": "@RELAY_KEM_SK_HEX@",
+      "transport": {
+        "kind": "udp",
+        "host": "0.0.0.0",
+        "port": @REACH_RELAY_PORT@
+      },
+      "packet": {
+        "payload_size": 2048,
+        "routing_size": 16,
+        "max_hops": 5
+      },
+      "supernode": {
+        "enabled": true,
+        "public_ip": "@REACH_RELAY_HOST@",
+        "relay_secret_hex": "@RELAY_SECRET_HEX@",
+        "advertise_relay": true,
+        "accept_inbound_mix": true
+      },
+      "peer_address": {
+        "enabled": true,
+        "heartbeat_interval_seconds": 120,
+        "registration_ttl_seconds": 86400
+      }
+    }
+  }
+}

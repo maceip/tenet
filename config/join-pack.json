@@ -1,0 +1,31 @@
+{
+  "schema": "por.join_pack.v1",
+  "generated_at": "2026-06-04T20:02:19Z",
+  "matcher": {
+    "schema": "por.live_enclave.v1",
+    "url": "https://5faf834eac20.aeon.site/",
+    "approved_value_x": [
+      "5faf834eac20adaf931a8a7c18cb7a75630a5225322ee6caade2406e0f471299f2de48ade0d69804d1d4558883a5ef00"
+    ],
+    "tls_spki_hash": "d5ef2ab186ec717791ea506da7be7d189a86e90078f09cc99038c3ba8daa8d96",
+    "require_spki_pin": true,
+    "aw_bin": "aw",
+    "attested_workload_sha": "79a5ea2328f2b30192e57b53913355dcd5e0201e"
+  },
+  "reachability_relay": {
+    "relay_id": "reach-beta-1",
+    "host": "3.121.69.82",
+    "port": 4433,
+    "verify_key": "40cb87400feb91faffed67b3497d86987b0bf01e96da2ff06f508b2420e68fc3",
+    "kem_pk": "bde1972d49cde9df33f2a24abe192400f3969951ef7528a433d70e52b1d44919"
+  },
+  "directory": {
+    "mode": "attested_matcher",
+    "match_url": "https://5faf834eac20.aeon.site/v1/match",
+    "deliver_url": "https://5faf834eac20.aeon.site/v1/deliver",
+    "note": "Beta joiners do not fetch a separate public directory snapshot URL. Manifests are baked into the Nitro EIF; discovery is POST /v1/match over attested TLS."
+  },
+  "asker": {
+    "mailbox_config": "live-mailbox-client.json"
+  }
+}

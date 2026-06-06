@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-binaries-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test (gate)
@@ -51,19 +55,26 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build binary
-        run: python scripts/build_binary.py --name por-${{ matrix.target }}
+        run: python scripts/build_binary.py --name por-${{ matrix.target }} --also-name tenet-${{ matrix.target }}
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: por-${{ matrix.target }}
-          path: dist/por-${{ matrix.target }}*
+          path: dist/*
           if-no-files-found: error
 
   android:
-    # aarch64-Linux build: runs on Android under Termux (Linux userspace).
-    # A native APK additionally needs Android-targeted wheels for the native
-    # crypto dependencies (pynacl, aioquic, pqcrypto), which are not yet
-    # available — tracked separately. This job is intentionally non-blocking.
+    # Android target = full, functional client on the device today, as an
+    # aarch64-Linux binary that runs under Termux (Android's Linux userspace).
+    #
+    # A packaged .apk is the eventual goal and would be built with the NDK via
+    # python-for-android (buildozer) — the NDK is not the blocker. The blocker
+    # is p4a recipes: pynacl/libsodium, cryptography, and msgpack have recipes,
+    # but aioquic and pqcrypto do not, and cryptography also needs the
+    # Rust-for-Android targets. Until those recipes exist + are validated on a
+    # real Android build, an .apk would ship a crippled client (no QUIC
+    # transport, no post-quantum signatures), so we ship the complete aarch64
+    # binary instead. APK milestone tracked separately. Non-blocking.
     name: android-aarch64 (termux)
     needs: test
     runs-on: ubuntu-24.04-arm
@@ -74,10 +85,35 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build aarch64 binary
-        run: python scripts/build_binary.py --name por-android-aarch64
+        run: python scripts/build_binary.py --name por-android-aarch64 --also-name tenet-android-aarch64
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: por-android-aarch64
-          path: dist/por-android-aarch64*
+          path: dist/*
           if-no-files-found: error
+
+  release:
+    name: github-release
+    needs: [build, android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: por-*
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+          generate_release_notes: true

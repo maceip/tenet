@@ -3,20 +3,21 @@
 import pytest
 from pathlib import Path
 
-from sphinxmix.ta_claims import (
+from tenet.packet.ta_claims import (
     CLAIM_ENCRYPTED_RELAY_CHAIN,
     NOT_GPA_RESISTANT,
     assert_honest_streaming_copy,
     find_forbidden_streaming_claims,
     response_claim_headers,
+    missing_scan_paths,
     scan_files_for_forbidden_claims,
     streaming_return_descriptor,
 )
-from por.envelope import HYBRID_RETURN_PATH_V2, PromptRequestEnvelope
-from por.expert_mode import ExpertModeConfig, prepare_expert_mode_request
-from por.expert_route import RouteIntent
-from por.directory import PublicManifestDirectory
-from por.memory_index import IndexConfig, build_memory_index
+from tenet.envelope import HYBRID_RETURN_PATH_V2, PromptRequestEnvelope
+from tenet.experts.expert_mode import ExpertModeConfig, prepare_expert_mode_request
+from tenet.experts.expert_route import RouteIntent
+from tenet.experts.directory import PublicManifestDirectory
+from tenet.experts.memory_index import IndexConfig, build_memory_index
 
 
 def test_streaming_return_descriptor_includes_ta_claim():
@@ -64,7 +65,8 @@ def test_expert_mode_default_envelope_has_ta_claim(tmp_path):
 
 
 def test_scan_tracked_docs_are_honest():
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
+    assert missing_scan_paths(root) == ()
     violations = scan_files_for_forbidden_claims(root)
     assert violations == []
 

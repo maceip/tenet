@@ -1,0 +1,43 @@
+# TEE image for the matcher/mailbox plane (STATUS.md item 9).
+#
+# Packages `por.enclave_plane_server` as the in-TEE workload, fronted by the
+# bountynet attestation shim (recycled from runcards/bountynet-genesis). This is
+# the EIF the Nitro deploy builds (deploy/nitro-deploy.sh):
+#
+#   docker build -t matcher-enclave -f deploy/Dockerfile.enclave .
+#   nitro-cli build-enclave --docker-uri matcher-enclave:latest \
+#       --output-file matcher.eif        # the digest here becomes PCR0 / Value X
+#
+# Base pinned to amazonlinux:2023-minimal to match bountynet-genesis v2 so the
+# EIF measurement (PCR0) is reproducible — the same base the genesis Nitro path
+# was validated on (v2/Dockerfile.enclave).
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal
+
+# Python runtime for the matcher workload (the security-critical oblivious core
+# is slated to move to Rust (item 7) — but the wire shape runs in Python).
+RUN dnf install -y python3 && dnf clean all
+
+# The attestation shim: detects the TEE, computes Value X over the image, binds
+# it into the quote, generates the attested-TLS keypair *inside* the enclave, and
+# serves over vsock. Built from the runcards/bountynet-genesis tree; supplied as
+# a build artifact named `bountynet-bin` in the build context.
+COPY bountynet-bin /usr/local/bin/bountynet
+
+# The matcher/mailbox application code + its loopback launcher.
+
+COPY tenet/ /app/tenet/
+COPY deploy/enclave-workload.sh /usr/local/bin/enclave-workload.sh
+COPY deploy/enclave-entry.sh /usr/local/bin/enclave-entry.sh
+RUN chmod +x /usr/local/bin/enclave-workload.sh /usr/local/bin/enclave-entry.sh
+ENV PYTHONPATH=/app
+WORKDIR /app
+
+# INTEGRATION GAP (tracked, honest): bountynet-genesis v2 `cmd_enclave` serves the
+# attestation JSON + EAT over the enclave's vsock-TLS (main.rs serve_tls_vsock);
+# it does NOT reverse-proxy a co-located application onto that same channel. So
+# this image launches the matcher on loopback AND runs bountynet for attestation,
+# but routing /v1/match through the *attested* TLS channel needs a bountynet
+# enclave-proxy mode that does not yet exist (task: bountynet app-proxy). Until
+# then the matcher's loopback port is not reachable by clients over attested TLS.
+# The EAT/channel-binding half already works; this is the remaining wiring.
+CMD ["/usr/local/bin/enclave-entry.sh"]

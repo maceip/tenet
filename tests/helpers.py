@@ -1,14 +1,21 @@
-"""Helpers shared across P-OR tests."""
+"""Helpers shared across tenet tests."""
 
 from __future__ import annotations
 
 import json
 import socket
+import subprocess
+import sys
 from pathlib import Path
+from typing import Sequence
 
-from sphinxmix.OutfoxParams import OutfoxParams
+from tenet.packet.OutfoxParams import OutfoxParams
 
-from por.config import DEFAULT_PAYLOAD_SIZE, DEFAULT_ROUTING_SIZE
+from tenet.config import DEFAULT_PAYLOAD_SIZE, DEFAULT_ROUTING_SIZE
+from tenet.experts.directory import PublicManifestDirectory
+from tenet.experts.expert_route import PeerObservation
+from tenet.experts.memory_index import IndexConfig, build_memory_index
+from tenet.mixnet.wire_frame import encode_shutdown
 
 
 def reserve_udp_ports(count: int) -> list[int]:
@@ -63,6 +70,88 @@ def write_wire_cluster(
     config_path = tmp_path / "cluster.json"
     config_path.write_text(json.dumps(harness), encoding="utf-8")
     return config_path, harness
+
+
+def demo_node_ids(node_count: int) -> list[str]:
+    base = ["relay1", "relay2", "expert_art", "expert_sys", "relay3"]
+    return base[:node_count]
+
+
+def write_process_wire_cluster(tmp_path: Path, *, node_count: int):
+    node_ids = tuple(demo_node_ids(node_count))
+    config_path, cluster = write_wire_cluster(tmp_path, node_ids=node_ids)
+    return config_path, cluster, list(node_ids)
+
+
+def demo_directory(tmp_path: Path) -> PublicManifestDirectory:
+    art_root = tmp_path / "expert_art_memory"
+    sys_root = tmp_path / "expert_sys_memory"
+    art_root.mkdir(exist_ok=True)
+    sys_root.mkdir(exist_ok=True)
+    (art_root / "impressionism.md").write_text(
+        "Monet Degas Renoir Impressionism Paris Salon color light brushwork modern painting.",
+        encoding="utf-8",
+    )
+    (sys_root / "systems.md").write_text(
+        "QUIC UDP congestion control packet loss stream transport scheduler.",
+        encoding="utf-8",
+    )
+    art_manifest = build_memory_index(IndexConfig(peer_id="expert_art", roots=(str(art_root),))).manifest
+    sys_manifest = build_memory_index(IndexConfig(peer_id="expert_sys", roots=(str(sys_root),))).manifest
+    return PublicManifestDirectory.from_manifests(
+        (art_manifest, sys_manifest),
+        (
+            PeerObservation(peer_id="expert_art", p50_latency_ms=80, completion_rate=0.99),
+            PeerObservation(peer_id="expert_sys", p50_latency_ms=60, completion_rate=0.99),
+        ),
+        source="test-directory",
+    )
+
+
+def start_process_nodes(config_path: Path, node_ids: Sequence[str]) -> list[subprocess.Popen]:
+    procs = []
+    for node_id in node_ids:
+        subcommand = "expert" if node_id.startswith("expert") else "relay"
+        procs.append(
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "tenet",
+                    subcommand,
+                    "--config",
+                    str(config_path),
+                    "--node-id",
+                    node_id,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        )
+    return procs
+
+
+def shutdown_process_nodes(cluster: dict, node_ids: Sequence[str]) -> None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        for node_id in node_ids:
+            node = cluster["nodes"][node_id]
+            sock.sendto(encode_shutdown(), (node["host"], node["port"]))
+    finally:
+        sock.close()
+
+
+def collect_process_logs(procs: Sequence[subprocess.Popen]) -> str:
+    chunks = []
+    for proc in procs:
+        try:
+            out, _ = proc.communicate(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            out, _ = proc.communicate(timeout=2.0)
+        chunks.append(out)
+    return "".join(chunks)
 
 
 def parse_json_log_events(text: str) -> list[dict[str, object]]:

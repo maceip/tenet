@@ -1,0 +1,71 @@
+name: enclave-engine
+
+# Gate tenet against the pinned attested-workload SHA (STATUS.md item 9).
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "por/enclave_attest.py"
+      - "por/attested_transport.py"
+      - "deploy/**"
+      - "STATUS.md"
+      - "tests/test_enclave_attest.py"
+      - ".github/workflows/enclave-engine.yml"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "por/enclave_attest.py"
+      - "por/attested_transport.py"
+      - "deploy/**"
+      - "STATUS.md"
+      - "tests/test_enclave_attest.py"
+      - ".github/workflows/enclave-engine.yml"
+  workflow_dispatch:
+
+env:
+  ATTESTED_WORKLOAD_SHA: 79a5ea2328f2b30192e57b53913355dcd5e0201e
+
+jobs:
+  attested-workload-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: maceip/attested-workload
+          ref: ${{ env.ATTESTED_WORKLOAD_SHA }}
+          path: attested-workload
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo test (pinned engine)
+        working-directory: attested-workload
+        run: cargo test --all-targets
+
+  tenet-enclave-gate:
+    runs-on: ubuntu-latest
+    needs: attested-workload-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+        with:
+          repository: maceip/attested-workload
+          ref: ${{ env.ATTESTED_WORKLOAD_SHA }}
+          path: attested-workload
+      - name: Install pytest
+        run: pip install pytest
+      - name: Enclave attestation unit tests
+        run: pytest -q tests/test_enclave_attest.py
+      - name: Assemble matcher EIF context
+        env:
+          ATTESTED_WORKLOAD_REPO: ${{ github.workspace }}/attested-workload
+        run: ./deploy/assemble-matcher-eif.sh
+      - name: Smoke-check EIF layout
+        run: |
+          test -x deploy/eif-build/bountynet-bin
+          test -f deploy/eif-build/Dockerfile
+          test -f deploy/eif-build/app/run_matcher.py
+          test -d deploy/eif-build/oblivious-core
+          test -f deploy/eif-build/oblivious-core/Cargo.toml

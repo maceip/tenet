@@ -1,10 +1,10 @@
-from por.expert_route import (
+from tenet.experts.expert_route import (
     PeerCandidate,
     PeerObservation,
     RouteIntent,
     plan_expert_route,
 )
-from por.memory_index import IndexConfig, build_memory_index
+from tenet.experts.memory_index import IndexConfig, build_memory_index
 
 
 def _manifest(tmp_path, peer_id, filename, text):

@@ -1,28 +1,28 @@
-"""Tests for the Outfox post-quantum packet format with P-OR extensions.
+"""Tests for the Outfox post-quantum packet format with tenet extensions.
 
 Verifies: per-hop KEM, nested AEAD, HKDF, per-layer timestamps,
 dummy flag, ML-DSA-65 signatures, return-path circuit processing,
 and self-healing.
 """
 
-from sphinxmix.OutfoxParams import (
+from tenet.packet.OutfoxParams import (
     OutfoxParams, KEM_X25519,
     aead_encrypt, aead_decrypt, hkdf,
     make_timestamp, check_timestamp, sign_payload, verify_payload,
     generate_signing_keypair,
     FLAG_REAL, FLAG_DUMMY, CIRCUIT_TTL_SECONDS,
 )
-from sphinxmix.OutfoxClient import (
+from tenet.packet.OutfoxClient import (
     pki_entry, packet_create, packet_create_repliable,
     packet_create_signed, packet_create_dummy,
     surb_create, surb_use, surb_check, surb_recover,
     pad_body, unpad_body,
 )
-from sphinxmix.OutfoxNode import (
+from tenet.packet.OutfoxNode import (
     outfox_process, circuit_process, circuit_self_heal,
     circuit_packet_create, circuit_packet_process, circuit_packet_decrypt,
 )
-from sphinxmix.OutfoxParams import derive_circuit_key, CIRCUIT_MAGIC
+from tenet.packet.OutfoxParams import derive_circuit_key, CIRCUIT_MAGIC
 from os import urandom
 import struct
 import time
@@ -488,8 +488,8 @@ def test_circuit_header_budget():
         route = list(path)
         keys_list = [pkiPub[nid].y for nid in path]
 
-        from sphinxmix.OutfoxClient import packet_create_repliable
-        from sphinxmix.OutfoxParams import derive_circuit_key
+        from tenet.packet.OutfoxClient import packet_create_repliable
+        from tenet.packet.OutfoxParams import derive_circuit_key
         (header, payload), _, _, circuit_info = packet_create_repliable(
             params, route, keys_list, route, keys_list, b"budget test",
             install_circuit=True)
@@ -513,7 +513,7 @@ def test_circuit_header_budget():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Outfox + P-OR Extensions Test Suite")
+    print("Outfox + tenet Extensions Test Suite")
     print("=" * 60)
     print()
 

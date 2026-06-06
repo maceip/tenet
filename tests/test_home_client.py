@@ -17,17 +17,21 @@ import socket
 import time
 
 import pytest
-from sphinxmix.OutfoxParams import OutfoxParams
+from tenet.packet.OutfoxParams import OutfoxParams
 
-from por.client import run_client_once
-from por.config import ClusterConfig, PorConfig
-from por.daemon.directory import make_directory_handler
-from por.daemon.supernode import SupernodeDaemon
-from por.directory import DirectorySnapshot, PeerRecord, PublicManifestDirectory, load_public_snapshot_directory
-from por.reach_wire import REACH_CHALLENGE, decode_reach_datagram
-from por.memory_index import IndexConfig, build_memory_index
-from por.node_runtime import WireNodeRuntime
-from por.reach_wire import encode_confirm, encode_register
+from tenet.experts.client import run_client_once
+from tenet.config import ClusterConfig, PorConfig
+from tenet.edges.cli.directory import make_directory_handler
+from tenet.edges.cli.supernode import SupernodeDaemon
+from tenet.experts.directory import DirectorySnapshot, PeerRecord, PublicManifestDirectory, load_public_snapshot_directory
+from tenet.experts.expert_mode import ExpertModeConfig
+from tenet.handles import OpaqueHandleIssuer, opaque_handle_record_from_dict
+from tenet.experts.matcher import PLAIN_MATCHER_V1, PlainEnclavePlaneDiscoveryProvider, PlainMailbox, PlainMatcher
+from tenet.mixnet.reach_wire import REACH_CHALLENGE, decode_reach_datagram
+from tenet.experts.memory_index import IndexConfig, build_memory_index
+from tenet.mixnet.node_runtime import WireNodeRuntime
+from tenet.llm.provider import make_reply_handler
+from tenet.mixnet.reach_wire import encode_confirm, encode_register
 from tests.harness import mixnet_harness
 
 
@@ -59,6 +63,12 @@ def test_home_client_completes_with_directory_trusted_relay_and_no_static_expert
         manifest = build_memory_index(
             IndexConfig(peer_id="peer-art", roots=(str(root),))
         ).manifest
+        handle_record = OpaqueHandleIssuer(b"home-client-handle-secret").record(
+            peer_id="peer-art",
+            manifest_digest=manifest.index_digest,
+            mailbox_id="mailbox-a",
+            now=1000.0,
+        )
 
         cluster_dict = {
             "params": packet,
@@ -101,24 +111,33 @@ def test_home_client_completes_with_directory_trusted_relay_and_no_static_expert
         expert_cluster_path = tmp_path / "expert-cluster.json"
         expert_cluster_path.write_text(json.dumps(expert_cluster_dict), encoding="utf-8")
         expert_cluster = ClusterConfig.load(str(expert_cluster_path))
-        expert_runtime = WireNodeRuntime(expert_cluster, "peer-art", role="expert")
+        # No provider configured: the handler still runs and surfaces the same
+        # provider-error the test asserts below (faithful to the pre-Seam-A path).
+        expert_runtime = WireNodeRuntime(
+            expert_cluster, "peer-art", role="expert", reply_handler=make_reply_handler()
+        )
 
         # Relay serves first so it can answer the expert's REACH registration.
         net.serve(relay_runtime, relay_sock)
-        _register_expert_via_reach(expert_sock, relay_addr, relay_daemon)
+        _register_expert_via_reach(
+            expert_sock,
+            relay_addr,
+            relay_daemon,
+            peer_id=handle_record.handle,
+        )
         # Registration done synchronously on expert_sock; now hand it to the
         # serve thread for the request/return path.
         net.serve(expert_runtime, expert_sock)
 
-        peer_address = relay_daemon.relay.address_record("peer-art")
+        peer_address = relay_daemon.relay.address_record(handle_record.handle)
         assert peer_address is not None
 
         snapshot_path = tmp_path / "directory-snapshot.json"
         PublicManifestDirectory.from_manifests(
             [manifest],
             observations=(),
-        ).snapshot(generated_at="2026-05-30T00:00:00+00:00").with_peer_address_records(
-            {"peer-art": peer_address.to_public_dict()}
+        ).snapshot(generated_at="2026-05-30T00:00:00+00:00").with_handle_records(
+            {"peer-art": handle_record.to_public_dict()}
         ).save(snapshot_path)
 
         snapshot = DirectorySnapshot.load(snapshot_path)
@@ -126,8 +145,8 @@ def test_home_client_completes_with_directory_trusted_relay_and_no_static_expert
         records[0] = PeerRecord(
             manifest=records[0].manifest,
             observation=records[0].observation,
-            descriptor={"kem_pk": expert_pk.hex()},
-            peer_address=records[0].peer_address,
+            descriptor=records[0].descriptor,
+            handle=records[0].handle,
         )
         snapshot = snapshot.__class__(
             records=tuple(records),
@@ -173,11 +192,32 @@ def test_home_client_completes_with_directory_trusted_relay_and_no_static_expert
         )
 
         assert "peer-art" not in config.to_cluster_config().nodes
+        loaded_directory = load_public_snapshot_directory(directory_url)
+        loaded_handle_record = opaque_handle_record_from_dict(
+            loaded_directory.handle_records()["peer-art"]
+        )
+        mailbox = PlainMailbox()
+        mailbox.add(
+            record=loaded_handle_record,
+            routing_kem_pk_hex=expert_pk.hex(),
+            peer_address=peer_address.to_public_dict(),
+        )
+        discovery_provider = PlainEnclavePlaneDiscoveryProvider(
+            PlainMatcher.from_records(
+                loaded_directory.records,
+                {"peer-art": loaded_handle_record},
+            ),
+            mailbox,
+        )
         result = run_client_once(
             cluster=config.to_cluster_config(client_node_id="client-home"),
-            discovery_provider=load_public_snapshot_directory(directory_url),
+            discovery_provider=discovery_provider,
             prompt="What did Monet change?",
             requested_expertise="Impressionist art history",
+            expert_mode_config=ExpertModeConfig(
+                discovery_mode=PLAIN_MATCHER_V1,
+                min_pool_size=1,
+            ),
             peer_address_config=config.daemon("client-home").peer_address,
             trusted_reachability_relays=(
                 config.daemon("client-home").client.trusted_reachability_relays
@@ -188,20 +228,25 @@ def test_home_client_completes_with_directory_trusted_relay_and_no_static_expert
         )
 
         assert result.fallback_used is False
-        assert result.selected_peer_id == "peer-art"
+        assert result.selected_peer_id == handle_record.handle
+        assert loaded_directory.records[0].handle is not None
+        assert "peer_address" not in json.loads(snapshot_path.read_text())["records"][0]
+        assert "event=handle_resolved" in result.client_logs
         assert "event=dial_target" in result.client_logs
         assert "event=send_prepared_envelope" in result.client_logs
         assert relay_addr[0] in result.client_logs
-        assert "frontier_fallback" not in result.response_text
-        assert result.response_text
+        assert "[provider_error]" in result.response_text
+        assert "POR_PROVIDER or daemon.provider is required" in result.response_text
 
 
 def _register_expert_via_reach(
     expert_sock: socket.socket,
     relay_addr: tuple[str, int],
     relay_daemon: SupernodeDaemon,
+    *,
+    peer_id: str = "peer-art",
 ) -> None:
-    expert_sock.sendto(encode_register("peer-art"), relay_addr)
+    expert_sock.sendto(encode_register(peer_id), relay_addr)
     deadline = time.time() + 2.0
     cookie = None
     while time.time() < deadline:
@@ -215,10 +260,10 @@ def _register_expert_via_reach(
         cookie = action.cookie
         break
     assert cookie is not None
-    expert_sock.sendto(encode_confirm("peer-art", cookie), relay_addr)
+    expert_sock.sendto(encode_confirm(peer_id, cookie), relay_addr)
     deadline = time.time() + 2.0
     while time.time() < deadline:
-        if relay_daemon.forwarder.lookup_peer_addr("peer-art") is not None:
+        if relay_daemon.forwarder.lookup_peer_addr(peer_id) is not None:
             return
         time.sleep(0.01)
     raise AssertionError("expert never registered with supernode")

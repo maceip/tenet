@@ -15,17 +15,17 @@ Fix 3: Nymserver elimination (Section 4.2)
 
 from os import urandom
 
-from sphinxmix.OutfoxParams import (
+from tenet.packet.OutfoxParams import (
     OutfoxParams, KEM_X25519,
     aead_encrypt, aead_decrypt,
     FLAG_REAL, FLAG_DUMMY,
 )
-from sphinxmix.OutfoxClient import (
+from tenet.packet.OutfoxClient import (
     pki_entry, packet_create, packet_create_repliable,
     surb_create, surb_use, surb_check, surb_recover,
     pad_body, unpad_body,
 )
-from sphinxmix.OutfoxNode import outfox_process
+from tenet.packet.OutfoxNode import outfox_process
 
 from nacl.bindings import crypto_scalarmult_base, crypto_scalarmult
 

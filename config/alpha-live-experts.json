@@ -1,0 +1,28 @@
+{
+  "version": "por.alpha_live_experts.v1",
+  "generated_at": "2026-06-04T04:19:06Z",
+  "created_at": "2026-06-04T04:15:00+00:00",
+  "matcher_data_dir": "deploy/data/beta",
+  "experts": [
+    {
+      "expert_id": "alpha-seed-art",
+      "group_id": "art_culture",
+      "corpus_dir": "data/alpha/corpus/alpha-seed-art",
+      "host": "35.159.21.110",
+      "ssh_user": "ubuntu",
+      "ssh_key": "~/.ssh/tenet-nitro.pem",
+      "handle": "h4a30b46453eb7bd",
+      "manifest_digest": "735ca92d096f88a6b6a279a8f44ed649b9fca114bec4ceb41d21314eef37f7d1"
+    },
+    {
+      "expert_id": "alpha-seed-security",
+      "group_id": "security_privacy",
+      "corpus_dir": "data/alpha/corpus/alpha-seed-security",
+      "host": "63.185.117.35",
+      "ssh_user": "ubuntu",
+      "ssh_key": "~/.ssh/tenet-nitro.pem",
+      "handle": "h0a0a24b9434a966",
+      "manifest_digest": "6c9aafbc537aefc172cbd2d747029bc823fe48c9040ada1aabfb5ab1633740bf"
+    }
+  ]
+}

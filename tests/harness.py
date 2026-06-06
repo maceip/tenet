@@ -1,4 +1,4 @@
-"""Durable integration-test harness for P-OR mixnet nodes.
+"""Durable integration-test harness for tenet mixnet nodes.
 
 One module owns UDP socket + serve-thread lifecycle so individual tests stop
 re-implementing (and re-breaking) it.
@@ -31,8 +31,8 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Iterator
 
-from por.config import ClusterConfig
-from por.node_runtime import WireNodeRuntime
+from tenet.config import ClusterConfig
+from tenet.mixnet.node_runtime import WireNodeRuntime
 
 
 def bind_local_udp() -> socket.socket:
@@ -55,7 +55,7 @@ def static_wire_cluster(
     directly (no real network IO), so they never touch the socket-reservation
     path at all. Ports are fixed placeholders that are never bound.
     """
-    from sphinxmix.OutfoxParams import OutfoxParams
+    from tenet.packet.OutfoxParams import OutfoxParams
 
     params = OutfoxParams(
         payload_size=payload_size, routing_size=routing_size, max_hops=max_hops
@@ -182,7 +182,7 @@ class MixnetHarness:
         Replaces the old ``write_wire_cluster``/``reserve_udp_ports`` idiom that
         bound ports only to close and rebind them later.
         """
-        from sphinxmix.OutfoxParams import OutfoxParams
+        from tenet.packet.OutfoxParams import OutfoxParams
 
         params = OutfoxParams(
             payload_size=payload_size, routing_size=routing_size, max_hops=max_hops

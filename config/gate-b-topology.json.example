@@ -1,0 +1,35 @@
+{
+  "version": "por.gate_b_topology.v1",
+  "description": "Network-beta real nodes. experts[] must be on hosts different from reach_relay.host.",
+  "roles": {
+    "reach_relay": {
+      "host": "3.121.69.82",
+      "port": 4433,
+      "ssh_user": "ec2-user",
+      "ssh_key": "~/.ssh/tenet-nitro.pem"
+    },
+    "experts": [
+      {
+        "node_id": "expert-1",
+        "host": "3.78.243.239",
+        "ssh_user": "ubuntu",
+        "ssh_key": "~/.ssh/tenet-nitro.pem"
+      },
+      {
+        "node_id": "expert-2",
+        "host": "3.78.244.100",
+        "ssh_user": "ubuntu",
+        "ssh_key": "~/.ssh/tenet-nitro.pem"
+      }
+    ],
+    "matcher": {
+      "url": "https://7d90e638b585.aeon.site/",
+      "host": "3.121.69.82",
+      "ssh_user": "ec2-user",
+      "ssh_key": "~/.ssh/tenet-nitro.pem"
+    },
+    "asker": {
+      "host": "local"
+    }
+  }
+}

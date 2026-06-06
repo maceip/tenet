@@ -1,6 +1,6 @@
 import json
 
-from por.memory_index import (
+from tenet.experts.memory_index import (
     IndexConfig,
     MemoryManifest,
     build_memory_index,

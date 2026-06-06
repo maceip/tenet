@@ -1,0 +1,37 @@
+{
+  "version": "por.config.v1",
+  "default_node_id": "REPLACE_WITH_OPAQUE_HANDLE",
+  "daemons": {
+    "REPLACE_WITH_OPAQUE_HANDLE": {
+      "role": "expert",
+      "node_id": "REPLACE_WITH_OPAQUE_HANDLE",
+      "kem_pk_hex": "@EXPERT_KEM_PK_HEX@",
+      "kem_sk_hex": "@EXPERT_KEM_SK_HEX@",
+      "transport": {
+        "kind": "udp",
+        "host": "0.0.0.0",
+        "port": 0
+      },
+      "packet": {
+        "payload_size": 2048,
+        "routing_size": 16,
+        "max_hops": 5
+      },
+      "provider": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY"
+      },
+      "peer_address": {
+        "enabled": true
+      },
+      "reach_registration": {
+        "enabled": true,
+        "relay_host": "@REACH_RELAY_HOST@",
+        "relay_port": @REACH_RELAY_PORT@,
+        "peer_id": "REPLACE_WITH_OPAQUE_HANDLE",
+        "heartbeat_interval_seconds": 10
+      }
+    }
+  }
+}

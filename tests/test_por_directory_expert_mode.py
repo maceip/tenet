@@ -1,17 +1,17 @@
 import pytest
 
-from por.directory import (
+from tenet.experts.directory import (
     PRIVATE_DISCOVERY_V1,
     PUBLIC_SNAPSHOT_V1,
     DiscoveryRequest,
     PrivateDiscoveryUnavailable,
     PublicManifestDirectory,
 )
-from por.envelope import HYBRID_RETURN_PATH_V2, PromptRequestEnvelope
-from sphinxmix.ta_claims import streaming_return_descriptor
-from por.expert_mode import ExpertModeConfig, prepare_expert_mode_request
-from por.expert_route import PeerObservation, RouteIntent
-from por.memory_index import IndexConfig, build_memory_index
+from tenet.envelope import HYBRID_RETURN_PATH_V2, PromptRequestEnvelope
+from tenet.packet.ta_claims import streaming_return_descriptor
+from tenet.experts.expert_mode import ExpertModeConfig, prepare_expert_mode_request
+from tenet.experts.expert_route import PeerObservation, RouteIntent
+from tenet.experts.memory_index import IndexConfig, build_memory_index
 
 
 def _manifest(tmp_path, peer_id, text):
@@ -125,7 +125,6 @@ def test_expert_mode_default_provider_request_is_expert_oriented(tmp_path):
     assert prepared.envelope is not None
     assert prepared.envelope.provider_request == {
         "provider": "expert_peer",
-        "selected_peer_id": "peer-art",
         "fallback_provider": "frontier",
         "stream": True,
     }

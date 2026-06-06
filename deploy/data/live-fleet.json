@@ -1,0 +1,58 @@
+{
+  "version": "por.live_fleet.v1",
+  "relay_id": "bootstrap-1",
+  "relay_secret_hex": "6c6976652d64656d6f2d72656c61792d7365637265742121",
+  "relay_host": "127.0.0.1",
+  "relay_port": 19001,
+  "expert_id": "monet-expert",
+  "expert_host": "127.0.0.1",
+  "expert_port": 19002,
+  "mailbox_port": 19003,
+  "relay_kem_pk_hex": "c4e5b012b37f4f14054cf044bca6612e41ab0331925444f0ca90c4771e400604",
+  "relay_kem_sk_hex": "02a68704723fefe07294cad43e275062865a4f53142c5575a174412888a067dd",
+  "expert_kem_pk_hex": "79e7089a588d32044d933106ff27f30428f6ace8a1a817ff5ae7f8b551914909",
+  "expert_kem_sk_hex": "bd077390cb88870c0cf12d9a3c28cfe7eb0aa4823d51b4727f149df49b982d25",
+  "handle_record": {
+    "version": "por.opaque_handle_record.v1",
+    "handle": "h1665315a4d2f039",
+    "mailbox_id": "live-mailbox",
+    "issued_at": 1000.0,
+    "expires_at": 1270.0,
+    "signature": "621951c3b28269327348d6bd5e5939cb2dd383c1ff1915dc03ca813368ff5526"
+  },
+  "manifest": {
+    "byte_count": 48000,
+    "chunk_count": 40,
+    "corpus_root": "demo",
+    "created_at": "2026-06-03T00:00:00+00:00",
+    "file_count": 12,
+    "file_types": {
+      ".md": 8
+    },
+    "index_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "peer_id": "monet",
+    "privacy": {
+      "publish_terms": true
+    },
+    "roots": [
+      "/corpus"
+    ],
+    "token_count": 9000,
+    "top_terms": [
+      [
+        "monet",
+        6
+      ],
+      [
+        "impressionism",
+        5
+      ],
+      [
+        "painting",
+        4
+      ]
+    ],
+    "version": "por.memory_manifest.v1"
+  },
+  "expert_reply": "matched via live attested mailbox"
+}

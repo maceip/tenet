@@ -1,0 +1,36 @@
+{
+  "schema": "por.live_mailbox_client.v1",
+  "description": "Client cluster for the current alpha/beta path via trusted public reachability relay.",
+  "params": {
+    "payload_size": 2048,
+    "routing_size": 16,
+    "max_hops": 5
+  },
+  "client": {
+    "host": "0.0.0.0",
+    "port": 0
+  },
+  "nodes": {
+    "@REACH_RELAY_ID@": {
+      "host": "@REACH_RELAY_HOST@",
+      "port": @REACH_RELAY_PORT@,
+      "kem_pk": "@RELAY_KEM_PK_HEX@",
+      "role": "relay"
+    }
+  },
+  "peer_address": {
+    "enabled": true
+  },
+  "expert_routing": {
+    "min_pool_size": 2,
+    "allow_degraded_pool": true
+  },
+  "trusted_reachability_relays": [
+    {
+      "relay_id": "@REACH_RELAY_ID@",
+      "host": "@REACH_RELAY_HOST@",
+      "port": @REACH_RELAY_PORT@,
+      "verify_key": "@RELAY_VERIFY_KEY_HEX@"
+    }
+  ]
+}

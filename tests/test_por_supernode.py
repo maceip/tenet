@@ -7,11 +7,11 @@ from os import urandom
 
 import pytest
 
-from por.config import TrustedReachabilityRelayConfig
-from por.daemon.supernode import SupernodeDaemon
-from por.envelope import PromptRequestEnvelope
-from por.node_runtime import WireNodeRuntime
-from por.peer_address import (
+from tenet.config import TrustedReachabilityRelayConfig
+from tenet.edges.cli.supernode import SupernodeDaemon
+from tenet.envelope import PromptRequestEnvelope
+from tenet.mixnet.node_runtime import WireNodeRuntime
+from tenet.mixnet.peer_address import (
     ROUTE_DIRECT,
     ROUTE_RELAY,
     TRANSPORT_H3_WEBSOCKET,
@@ -24,8 +24,8 @@ from por.peer_address import (
     peer_address_record_from_dict,
     verify_record_signature,
 )
-from por.supernode import SupernodeForwarder
-from por.transport_dial import resolve_dial_target, send_prepared_envelope_via_plan
+from tenet.mixnet.supernode import SupernodeForwarder
+from tenet.mixnet.transport_dial import resolve_dial_target, send_prepared_envelope_via_plan
 from tests.harness import static_wire_cluster
 
 

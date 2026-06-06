@@ -6,7 +6,7 @@ import ssl
 
 import pytest
 
-from por.quic_transport import (
+from tenet.mixnet.quic_transport import (
     AIOQUIC_AVAILABLE,
     H3WebSocketClient,
     H3WebSocketServer,

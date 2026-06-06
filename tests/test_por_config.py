@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from por.config import (
+from tenet.config import (
     CONFIG_VERSION,
     ROLE_CLIENT,
     ROLE_EXPERT,
@@ -17,7 +17,8 @@ from por.config import (
     TrustedReachabilityRelayConfig,
     load_config,
 )
-from por.directory import DirectorySnapshot
+from tenet.experts.directory import DirectorySnapshot
+from tenet.experts.expert_mode import ExpertModeConfig
 
 
 def test_single_daemon_config_loads_with_secure_transport_default(tmp_path):
@@ -68,7 +69,7 @@ def test_multi_daemon_config_round_trips_and_exports_expert_mode_config():
     assert relay.peers["expert-a"].endpoint.port == 5002
     assert expert.provider is not None
     assert expert.provider.resolve_api_key({"ANTHROPIC_API_KEY": "secret"}) == "secret"
-    assert expert.expert_routing.to_expert_mode_config().min_pool_size == 5
+    assert ExpertModeConfig.from_routing(expert.expert_routing).min_pool_size == 5
     assert config.to_dict()["daemons"]["expert-a"]["role"] == ROLE_EXPERT
 
 
@@ -353,4 +354,4 @@ def test_cluster_config_loads_current_demo_shape(tmp_path):
 
     assert cluster.params.routing_size == 96
     assert cluster.node("relay1").kem_pk_hex == "00" * 32
-    assert cluster.to_harness_dict()["nodes"]["relay1"]["kem_sk"] == "11" * 32
+    assert cluster.to_legacy_dict()["nodes"]["relay1"]["kem_sk"] == "11" * 32

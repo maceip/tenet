@@ -1,0 +1,36 @@
+# Real-matcher Nitro EIF: tenet matcher on loopback :8080, fronted by
+# attested-workload app-proxy over attested TLS.
+#
+# Build context: run ./assemble-matcher-eif.sh (or copy artifacts manually):
+#   bountynet-bin      <- attested-workload (deploy/build-bountynet-bin.sh)
+#   oblivious-core/    <- Rust PyO3 selector (built in stage 1)
+#   app/tenet/           <- sphinx-tahoe/tenet
+#   app/run_matcher.py
+#   entry-matcher.sh
+#
+#   docker build -t matcher-real .
+#   nitro-cli build-enclave --docker-uri matcher-real:latest --output-file matcher.eif
+
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS oblivious-builder
+# oblivious-core requires Python >=3.10; AL2023 default python3 is often 3.9.
+RUN dnf install -y python3.11 python3.11-pip python3.11-devel gcc gcc-c++ openssl-devel \
+    && dnf clean all
+RUN python3.11 -m pip install --no-cache-dir maturin
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+COPY oblivious-core /build/oblivious-core
+WORKDIR /build/oblivious-core
+ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+RUN python3.11 --version \
+    && python3.11 -m maturin build --release --features python -o /wheels --interpreter python3.11
+
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal
+RUN dnf install -y python3.11 python3.11-pip iproute && dnf clean all
+RUN python3.11 -m pip install --no-cache-dir cryptography pynacl pqcrypto
+COPY --from=oblivious-builder /wheels/*.whl /tmp/
+RUN python3.11 -m pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
+COPY bountynet-bin /usr/local/bin/bountynet
+COPY app/ /app/
+COPY entry-matcher.sh /entry-matcher.sh
+RUN chmod +x /entry-matcher.sh
+CMD ["/entry-matcher.sh"]

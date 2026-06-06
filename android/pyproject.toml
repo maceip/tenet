@@ -1,0 +1,24 @@
+[tool.briefcase]
+project_name = "Tenet"
+bundle = "network.tenet"
+version = "0.0.1"
+author = "tenet"
+author_email = "dev@tenet.network"
+url = "https://tenet.network"
+license.file = "LICENSE"
+
+[tool.briefcase.app.tenet]
+formal_name = "Tenet"
+description = "tenet node native self-test"
+long_description = "On-device self-test of the tenet native crypto stack."
+console_app = true
+sources = ["src/tenet", "tenet"]
+requires = [
+    "../dist/android-wheels/cffi-2.0.0-cp313-cp313-android_21_arm64_v8a.whl",
+    "../dist/android-wheels/msgpack-1.1.2-cp313-cp313-android_21_arm64_v8a.whl",
+    "../dist/android-wheels/pynacl-1.6.2-cp313-cp313-android_21_arm64_v8a.whl",
+    "../dist/android-wheels/pyaes-1.6.1-py3-none-any.whl",
+    "../dist/android-wheels/dilithium_py-1.4.0-py3-none-any.whl"
+]
+
+[tool.briefcase.app.tenet.android]

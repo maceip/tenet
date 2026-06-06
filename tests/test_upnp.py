@@ -4,7 +4,7 @@ Unit tests for the mapping logic. Actual UPnP/NAT-PMP requires a
 real router, so we test the API surface and failure handling.
 """
 
-from por.upnp import (
+from tenet.mixnet.upnp import (
     try_port_mapping, renew_mapping, release_mapping,
     PortMapping, MappingResult, _get_local_ip,
 )

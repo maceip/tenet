@@ -7,13 +7,12 @@ cd "$ROOT"
 
 WATCH_PATHS=(
   por
-  sphinxmix/OutfoxClient.py
-  sphinxmix/OutfoxNode.py
-  sphinxmix/mixnet.py
-  test_a5_exit.py
-  test_por_udp_demo.py
+  tenet.packet/OutfoxClient.py
+  tenet.packet/OutfoxNode.py
+  tests/mixnet_test_network.py
+  tests/test_por_wire.py
   scripts/check_ta_claims.py
-  docs/production_arc.md
+  notes/production_arc.md
 )
 
 snapshot() {
@@ -36,7 +35,7 @@ while true; sleep 45; do
   if ! diff -q "$BASELINE_FILE" "$CURRENT" >/dev/null 2>&1; then
     CHANGED="$(diff "$BASELINE_FILE" "$CURRENT" | rg '^[<>]' | head -20 || true)"
     mv "$CURRENT" "$BASELINE_FILE"
-    printf 'AGENT_LOOP_WAKE_POR_COORD {"prompt":"por/wire files changed; diff head:\\n%s\\nReconcile team ownership in docs/production_arc.md"}' \
+    printf 'AGENT_LOOP_WAKE_POR_COORD {"prompt":"tenet/wire files changed; diff head:\\n%s\\nReconcile team ownership in notes/production_arc.md"}' \
       "$(echo "$CHANGED" | tr '\n' ' ' | sed 's/"/\\"/g')"
     echo
   else

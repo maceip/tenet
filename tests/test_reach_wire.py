@@ -3,12 +3,12 @@
 import time
 import pytest
 
-from por.reach_wire import (
+from tenet.mixnet.reach_wire import (
     encode_register, encode_challenge, encode_confirm, encode_heartbeat,
     decode_reach_datagram, is_reach_datagram, ReachAction,
     REACH_REGISTER, REACH_CHALLENGE, REACH_CONFIRM, REACH_HEARTBEAT,
 )
-from por.peer_address import (
+from tenet.mixnet.peer_address import (
     UdpEndpoint, AddressExposurePolicy,
     TRANSPORT_QUIC_DATAGRAM, TRANSPORT_H3_WEBSOCKET,
 )

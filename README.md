@@ -1,189 +1,138 @@
-# tenet — the expert network
+# tenet
 
-**tenet routes a question to the peer most likely to answer it well.**
+tenet is an expert network: ask a question once, route it to the person or
+agent whose knowledge best matches it, and return an answer over a private
+mixnet path. The product direction is a human-scale mixture of experts where
+useful expertise can be discovered, reached, and eventually compensated; this
+repository currently implements the routing, attestation, reachability, and CLI
+runtime foundations for that network. Payments and payouts are not implemented
+in the current runtime.
 
-Most LLM setups ask one model, working from training data, every question.
-tenet does something different: it treats a network of participants — each with
-their own indexed knowledge and domain focus — as a routing surface. When you
-ask a question, tenet finds the peers whose local knowledge actually matches it,
-sends the question to one of them, and streams the answer back.
+> **Current live status, queue, pins, and operations:** [`STATUS.md`](STATUS.md)
+> is the source of truth. Archived design docs live under
+> `~/fat/tenet-archive/docs/`.
 
-The premise is plain: for a specialized question, the right specialist's
-indexed library beats a general model guessing from memory. A structural
-engineer's reference shelf answers a load-bearing question better than a generic
-completion. A wine importer's tasting notes know more about a region than a
-chat model does. tenet is the routing layer that connects the question to that
-knowledge.
+## Why It Exists
 
-This is an **expert-routing network** — not a chain, not a token, and not a
-verification scheme. There is nothing to mine and nothing to stake. The unit of
-value is a good answer.
+Most AI products ask one model every question. tenet treats expertise as a
+network instead: each participant can publish a statistical manifest of what
+they know, receive matching questions privately, and answer with their own local
+context plus a frontier model.
 
-## Why run a node
+For askers, this means better specialist answers without manually finding the
+right expert. For experts, it means their knowledge can become reachable by the
+network without publishing their files or opening a public port. For operators,
+it gives a concrete path from today's live expert-routing network toward a
+market where useful answers can be rewarded.
 
-If you run a node, your own questions become routable to every other expert on
-the network — and in exchange, your indexed knowledge becomes reachable by
-others when it's the best match. The more specialized what you contribute, the
-more specialized what you can reach.
+## Product Shape
 
-Participation is designed to be low-commitment and low-exposure:
-
-- **You don't expose your prompts.** A question travels a multi-hop encrypted
-  path; each relay on the path learns only the hop before and after it, never
-  who asked or who answered.
-- **Relays can't read traffic.** Only the chosen expert peer can open the
-  question; every relay in between forwards sealed bytes.
-- **You don't publish your files.** A node advertises a *manifest* — statistical
-  summaries and commitments describing *what it knows*, never raw documents or
-  paths.
-- **You don't need an open port.** A home node reaches the network through a
-  reachability relay; it never needs an inbound listener or a pasted IP address.
-
-## How it works
-
-1. Your client indexes local knowledge (documents, notes, corpora) into a
-   **manifest** that describes your expertise without revealing its contents.
-2. You register on the network as an **expert peer**.
-3. When someone's question matches your manifest, the network routes it to you
-   over an encrypted, multi-hop path.
-4. Your node answers using your local knowledge together with a frontier model,
-   producing a domain-specific reply.
-5. The answer streams back to the asker over a return path keyed so only they
-   can read it.
+- **Ask once.** `tenet ask` submits a prompt to the live network.
+- **Match privately.** The attested matcher selects candidate experts from
+  manifests baked into the Nitro enclave workload.
+- **Route sealed traffic.** The question travels through the mixnet and
+  reachability relay; relays forward bytes without reading them.
+- **Answer from local knowledge.** The selected expert opens the request,
+  combines local context with a model, and streams the answer back.
+- **Compensation later.** Payout UI and ledger integration are deliberately
+  excluded until there is a real payment contract.
 
 ## Architecture
 
-tenet is built from a small set of constructs. Each is described in full under
-[`docs/`](docs/); this is the map.
+| Layer | Current Package | Role |
+|-------|-----------------|------|
+| Packet | `tenet.packet` | Sphinx/Outfox packet primitives |
+| Base | `tenet.config`, `tenet.envelope`, `tenet.handles`, `tenet.log_events` | Shared types and compatibility schemas |
+| Mixnet | `tenet.mixnet` | Relay runtime, wire frames, QUIC, REACH, peer address control |
+| Enclave | `tenet.enclave` | Attested host, ARC, SPKI-pinned transport |
+| Experts | `tenet.experts` | Matching, manifests, routing, live client/expert flows |
+| Edges | `tenet.edges.cli` | CLI, daemon entrypoints, dashboard, local HTTP/SSE edge |
 
-| Construct | Role |
-|-----------|------|
-| **Client** | Indexes local knowledge, asks questions, and receives streamed answers. The same program everyone runs. |
-| **Expert peer** | A node selected to answer because its manifest matches the question. Combines local knowledge with a frontier model at the edge. |
-| **Manifest** | A privacy-preserving summary of a peer's knowledge — statistical features and commitments, published to the directory so the network can match questions to expertise without seeing the underlying corpus. |
-| **Directory** | A signed, public snapshot of who is on the network and what they claim to know. Clients pull it to plan a route; it carries no secrets. |
-| **Reachability relay** | A publicly reachable node that lets peers behind home routers participate without an inbound port. It forwards sealed bytes to a registered peer's current address and never inspects them. |
-| **Encrypted path** | The multi-hop forward route a question travels. Layered so each relay peels exactly one layer — enough to learn the next hop, and nothing more. |
-| **Return circuit** | The symmetric path the answer takes back, keyed so intermediate nodes forward opaque bytes and only the asker can read the result. |
+Some on-disk schemas still use `por.*.v1` names for compatibility with deployed
+configs, live pins, and persisted manifests. Treat those as wire/schema
+identifiers, not the product or package name.
 
-**One program, two postures.** Everyone runs the same client. A participant with
-a public address can be *promoted* by config into a reachability relay (a
-"supernode") that helps others connect. There is no separate gateway build and
-no second node type — capability comes from configuration, not from a different
-binary.
-
-**Where the boundaries sit.** Routing and reachability operate *below* the layer
-that can read a question and *above* the raw transport. Relays move sealed
-bytes; only the selected expert peer ever sees prompt content. These boundaries
-are enforced in the runtime and covered by the test suite.
-
-Full technical detail — the layered packet format, the wire protocol, the
-reachability/forwarding model, and the relay threat model — lives in
-[`docs/`](docs/):
-
-- [`docs/por_layer7_architecture.md`](docs/por_layer7_architecture.md) — application-layer design
-- [`docs/por_wire_protocol.md`](docs/por_wire_protocol.md) — on-the-wire packet and control formats
-- [`docs/supernode_threat_model.md`](docs/supernode_threat_model.md) — reachability-relay threat model
-
-## Quick start
-
-> The CLI and package are currently named `por`; a rename to `tenet` is in
-> progress and gated on the last reachability / persistent-connection work.
+## Quick Start
 
 ```bash
 pip install -r requirements.txt
-
-# Run the test suite
-pytest -q
-
-# Expert-routing demo (simulated, no network)
-python3 scripts/demo.py
-
-# Wire demo over real UDP sockets (separate node processes)
-python3 -m por.udp_demo demo
-
-# Unified client
-python3 -m por --help
-python3 -m por run --config client.json
-
-# Answer with a real model at the expert edge
-POR_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... python3 -m por.udp_demo demo
+make smoke
+python3 -m tenet --help
 ```
 
-### Home client
+### Ask The Live Network
 
-The product path is `python3 -m por run --config client.json`. A home client
-needs no inbound listener and never pastes an expert's address into config: it
-loads a signed directory snapshot, verifies the selected expert's reachability
-record, and dials a trusted reachability relay.
-
-```json
-{
-  "node_id": "client-home",
-  "role": "client",
-  "client": {
-    "directory_snapshot": "https://directory.example/snapshot",
-    "trusted_reachability_relays": [
-      {
-        "relay_id": "bootstrap-1",
-        "host": "203.0.113.10",
-        "port": 4433,
-        "verify_key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-      }
-    ],
-    "local_http": {
-      "enabled": true,
-      "bind": {"host": "127.0.0.1", "port": 8766},
-      "path": "/v1/expert"
-    }
-  },
-  "peer_address": {"enabled": true}
-}
-```
-
-A reachability relay is the same program promoted with `supernode` flags; see
-[`examples/`](examples/) for a paired client + relay config.
-
-## Project layout
-
-```
-por/                 Client, expert, and relay runtime (the product)
-por/daemon/          Node entry points
-tests/               Test suite (durable harness in tests/harness.py)
-scripts/             Demos and the release-binary builder
-docs/                Full technical detail
-examples/            Ready-to-run config pairs
-```
-
-## Building a release binary
-
-A node ships as a single self-contained executable — download one file and run
-it. Binaries are built per-platform with PyInstaller:
+There is no separate public directory URL for beta joiners. The current live
+network uses an attested matcher at `POST /v1/match`; public pins live in
+[`config/join-pack.json`](config/join-pack.json) and
+[`config/live-enclave.json`](config/live-enclave.json).
 
 ```bash
-python3 scripts/build_binary.py        # writes dist/por-<platform>-<arch>
-./dist/por-macos-arm64 --help
+./scripts/render-join-pack.sh
+python3 -m tenet ask --prompt "In one sentence, name one Monet painting technique."
 ```
 
-CI (`.github/workflows/build-binaries.yml`) builds binaries for Windows, macOS,
-and Linux x86-64; an experimental Android job tracks the mobile target.
+For the current operator dashboard:
 
-## Status
+```bash
+python3 -m tenet status --plain
+python3 -m tenet status --render-options
+```
 
-tenet is pre-1.0. The expert-routing, directory, encrypted-path, and
-reachability-relay layers work and are tested. The remaining work before the
-`tenet` rename is automatic home-router traversal and persistent connections.
+Ops-only attestation tools:
+
+```bash
+python3 -m tenet enclave check
+python3 -m tenet enclave match --prompt "Tell me about Monet"
+python3 -m tenet enclave send --prompt "What is impressionism in painting?"
+```
+
+## Run An Expert
+
+```bash
+./scripts/expert-onboard.sh /path/to/your/corpus
+# then start the printed tenet run command; export peer_address; rebuild TEE data
+```
+
+Experts publish a manifest, register reachability through the relay when behind
+NAT, and answer matching questions through the same `tenet` binary.
+
+## Project Layout
+
+```
+tenet/
+  packet/          Packet format and cryptographic routing primitives
+  mixnet/          Relay/runtime transports and REACH control plane
+  enclave/         Attested enclave host and transport trust
+  experts/         Matching, manifests, expert routing, live network clients
+  edges/cli/       User CLI, daemon entrypoints, status dashboard
+config/            Live pins, join packs, templates, client configs
+deploy/            Nitro, relay, and network deployment helpers
+scripts/           Build, smoke, packaging, and live-ops helpers
+tests/             Unit, integration, layering, and live-gated tests
+notes/             Design notes that still matter during the transition
+oblivious-core/    Rust oblivious top-k extension
+```
+
+## Build A Release Binary
+
+```bash
+python3 scripts/build_binary.py
+# dist/tenet-<platform>
+```
+
+If an `aw` binary is available, the build embeds it for one-file attestation
+checks; otherwise the built binary requires `aw` on `PATH`.
 
 ## Testing
 
+See [`STATUS.md`](STATUS.md) for which commands count as live-network proof.
+
 ```bash
-pytest -m product       # end-to-end acceptance paths
-pytest -m integration   # threaded / multi-process runtime checks
-pytest -m crypto        # low-level packet-format regressions
-pytest --cov=por        # coverage (floor enforced in pytest.ini)
+make smoke
+./scripts/verify-live.sh
+pytest -q
 ```
 
-## License
-
-LGPL v3. Built on packet-format work by Ian Goldberg and George Danezis (UCL);
-see [`docs/`](docs/) for academic references.
+`pytest` proves local behavior; it is not a substitute for `tenet enclave
+check|match|send` or `tenet ask` against the pinned live network.

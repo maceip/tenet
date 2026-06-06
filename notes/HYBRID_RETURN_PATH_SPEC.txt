@@ -1,0 +1,518 @@
+HYBRID RETURN PATH SPECIFICATION
+Outfox Forward + Symmetric Return Circuits
+Version 3 — 2026-05-30
+
+References:
+  Rial, Piotrowska, Halpin (2025) "Outfox"
+  Lazar et al. "Yodel" (constant-rate mixing)
+  Scherer, Weis, Strufe (2023) (security model)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. PURPOSE
+
+A lightweight symmetric return path for streaming LLM tokens.
+Augments (does not replace) the existing SURB reply mechanism.
+
+  SURB:     Single-shot reply. Full Outfox (KEM+AEAD+LIONESS) per hop.
+            For short responses, errors, setup confirmations.
+
+  Circuit:  Stateful symmetric stream. One AES-CTR op per hop.
+            For streaming token delivery (SSE/chunked responses).
+
+Both coexist. A repliable forward packet embeds a SURB (as today)
+AND installs circuit state at each reply-path relay. The exit node
+uses SURBs for short responses and circuits for streaming. The
+client handles both. The existing idsurb/sksurb/pending_surbs
+fields remain; circuit keys are stored separately.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. NON-GOALS
+
+  - GPA resistance during active streaming. A sustained burst of
+    500+ fixed-size packets at line rate is timing-correlatable by
+    a global passive adversary. Cover traffic (FLAG_DUMMY at constant
+    rate) mitigates this but is not mandated. This is a research
+    prototype. See docs/hybrid_return_ta_requirements.md (TA-1/TA-2/TA-3).
+
+  - Per-packet forward secrecy on the return path. Circuit keys live
+    in relay RAM for the circuit TTL. Compromise of relay RAM exposes
+    all active circuits on that relay.
+
+  - Packet reordering. Late arrivals are dropped. Application-layer
+    SSE framing handles token loss.
+
+  - Integrity guarantees on circuit packets. AES-CTR is malleable.
+    An active adversary can flip bits in transit. The application
+    layer must tolerate or detect corruption. This is an explicit
+    trade-off for speed — LIONESS (used on the forward path) is
+    a PRP that destroys content on tampering, but is too expensive
+    for per-token streaming.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. TERMINOLOGY
+
+  logical_circuit
+      Client-local session handle. NEVER transmitted on the wire.
+      Used only by the client to group keys, nonces, and re-establish
+      state across forward requests. 16 random bytes.
+
+  inbound_link_cid
+      16-byte cleartext lookup key on circuit packets this node
+      RECEIVES on the return path. Unique per (relay, logical_circuit).
+
+  outbound_link_cid
+      16-byte cleartext value this node WRITES into bytes 1-16 when
+      forwarding a circuit packet toward the client.
+
+  link binding invariant
+      For adjacent return-path hops (U → V), U.outbound_link_cid MUST
+      equal V.inbound_link_cid. Non-adjacent hops MUST NOT share
+      either identifier.
+
+  Why per-hop link CIDs: A single global circuit_id visible at every
+  hop lets colluding non-adjacent relays correlate return traffic and
+  link sender to exit. The forward path avoids this because each hop
+  sees fresh KEM ciphertext and hop-specific AEAD plaintext. Per-hop
+  link CIDs restore that property on the return path.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. RETURN PATH DATA FLOW
+
+Given a 3-hop reply path: Exit → Relay B → Relay A → Client.
+
+Setup (during forward pass):
+
+  The forward Outfox packet carries circuit setup material in each
+  hop's AEAD-encrypted routing metadata. When a relay decrypts its
+  AEAD layer during normal forward processing, it extracts the
+  circuit fields and stores them in its CircuitTable.
+
+  Each relay and the exit install a circuit entry:
+    inbound_link_cid → (circuit_key, next_hop, outbound_link_cid,
+                        high_watermark, expiry)
+
+  The client generated all seeds and holds all circuit keys.
+
+Streaming (return path — relay-transform model):
+
+  The exit encrypts with its own key only. Each relay on the return
+  path applies AES-CTR with its own key, adding a layer. Each relay
+  also rewrites the link_cid in the packet header to its own
+  outbound_link_cid before forwarding. The client peels all layers.
+
+  Construction (what happens at each entity):
+
+    Exit creates:     [0x01 | B.inbound | nonce | AES-CTR(key_exit, plain)]
+    Relay B receives: lookup B.inbound, apply AES-CTR(key_B, ...),
+                      rewrite → [0x01 | A.inbound | nonce | ...]
+    Relay A receives: lookup A.inbound, apply AES-CTR(key_A, ...),
+                      rewrite → [0x01 | client.inbound | nonce | ...]
+    Client receives:  lookup client.inbound, peel ALL layers
+
+  Client peels in order: key_A, key_B, key_exit (outermost first).
+
+  AES-CTR is self-inverse: encrypt and decrypt are the same XOR
+  with the keystream. Each entity sees only ciphertext at its layer.
+  No relay sees plaintext. Non-adjacent relays see different link_cids.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. CIRCUIT SETUP FIELDS
+
+Per-hop circuit setup is embedded in the forward packet's AEAD-
+encrypted routing metadata, after the existing fields.
+
+Current per-hop AEAD plaintext layout (OutfoxClient._build_header):
+
+  routing       routing_size bytes  (currently 16)
+  timestamp     8 bytes
+  flag          1 byte
+  [inner_header]
+
+Extended layout for circuit-bearing packets:
+
+  routing              routing_size bytes
+  timestamp            8 bytes
+  flag                 1 byte        bitfield: bit 0 = dummy, bit 1 = circuit
+                                     0x00 = real, no circuit
+                                     0x01 = dummy, no circuit
+                                     0x02 = real + circuit setup
+                                     0x03 = dummy + circuit setup
+  inbound_link_cid     16 bytes      CID this hop expects on ingress
+  key_seed             16 bytes      HKDF input for this hop's key
+  next_hop             routing_size bytes  return-path next hop (toward client)
+  outbound_link_cid    16 bytes      CID written on egress toward client
+  ttl                  2 bytes       circuit lifetime in seconds (uint16 BE)
+  [inner_header]
+
+Per-hop circuit overhead: 16 + 16 + routing_size + 16 + 2 = 66 bytes
+(at routing_size=16).
+
+Header budget:
+
+  Innermost AEAD plaintext with circuit fields:
+    routing(16) + ts(8) + flag(1) + circuit(66) = 91 bytes
+    + AEAD tag(16) + KEM ct(32) = 139 bytes
+
+  For max_hops=5 with circuit setup, the outermost header is
+  approximately 5 * (91 + 48) ≈ 695 bytes. Well within a single
+  UDP datagram or QUIC frame.
+
+Key derivation at each relay:
+
+  circuit_key = HKDF-SHA256(
+    ikm  = key_seed,
+    salt = inbound_link_cid,
+    info = "circuit",
+    len  = 16
+  )
+
+Registration during forward processing:
+
+  register_circuit(
+    inbound_link_cid,
+    circuit_key,
+    next_hop,
+    outbound_link_cid,
+    ttl
+  )
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. CIRCUIT PACKET FORMAT
+
+All circuit packets are padded to OutfoxParams.payload_size.
+Variable-size packets would leak token length.
+
+  Byte offset   Field
+  ──────────    ─────────────────────────────────────
+  0             type = 0x01 (circuit packet)
+  1-16          link_cid (16 bytes, hop-local)
+  17-24         nonce (8 bytes, big-endian counter)
+  25-26         inner_len (2 bytes, big-endian, encrypted)
+  27-30         magic (4 bytes, 0x504F5232 = "POR2", encrypted)
+  31-N          token_data (inner_len bytes, encrypted)
+  N-end         padding (random, encrypted)
+
+  Total: 1 + 16 + 8 + (payload_size - 25) = payload_size
+
+  The type byte (0x01) distinguishes circuit packets from forward
+  Outfox packets (type 0x00, prepended to existing format).
+
+  link_cid is HOP-LOCAL:
+    On the link U → V, sender U sets link_cid = V.inbound_link_cid.
+    Receiver V looks up CircuitTable[link_cid].
+    link_cid MUST NOT be reused across non-adjacent links.
+
+  Bytes 25 onward are encrypted with AES-CTR under the layered
+  circuit keys as described in §4. The nonce (bytes 17-24) is the
+  CTR IV — it is NOT encrypted, it is used AS the IV.
+
+  The magic field ("POR2") provides a fast corruption check after
+  decryption. This is not a MAC — it does not prevent active
+  tampering (see §2). But it lets the client distinguish
+  "successfully decrypted token" from "garbage" without attempting
+  to parse the token data.
+
+  If magic does not match after decryption, the client discards
+  the packet and increments a corruption counter. After 3
+  consecutive corrupted packets, the client initiates circuit
+  re-establishment via a new forward Outfox packet.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7. NONCE MANAGEMENT
+
+Each circuit has a single 64-bit counter, initialized to 0 at
+circuit creation. The exit node increments it once per packet.
+
+  full_iv = nonce (8 bytes) || 0x00 * 8    (padded to 16 for AES)
+
+The nonce is transmitted in cleartext in the packet header (bytes
+17-24). All hops on the return path use the SAME nonce value for
+their AES-CTR operation on that packet. This works because each
+hop uses a different key — the nonce only needs to be unique per
+(key, packet) pair, and it is.
+
+Relay nonce rules:
+
+  - Track high_watermark per circuit entry (single uint64)
+  - Accept only if nonce > high_watermark (strict increase)
+  - Update high_watermark on accept
+  - Gaps are allowed (packets may be lost in transit)
+  - A repeated or regressed nonce is a replay — drop silently
+  - Counter overflow (2^64) terminates the circuit
+
+No reorder window. No NACK. No resync. If a packet is lost or
+arrives late (after a higher nonce was seen), it is gone. The
+application layer (SSE event stream) handles missing tokens via
+its own framing — an incomplete JSON event is discarded, and the
+next event starts clean.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+8. RELAY PROCESSING
+
+When a relay receives a packet, it reads byte 0:
+
+  0x00 → forward Outfox packet → outfox_process() (existing)
+  0x01 → circuit return packet → circuit_packet_process() (new)
+
+circuit_packet_process:
+
+  1. Read link_cid from bytes 1-16
+  2. Look up entry = CircuitTable[link_cid]
+     Entry fields: circuit_key, next_hop, outbound_link_cid,
+                   high_watermark, expiry, last_active
+  3. If not found or expired:
+     a. Drop the packet. The relay has no next_hop or key.
+     b. The client detects the stall (no packets arriving), hits
+        its timeout, and re-establishes via a new forward packet.
+     c. Self-healing (circuit_self_heal) is used only when a circuit
+        entry EXISTS but an individual packet is missing/corrupted.
+  4. Read nonce from bytes 17-24
+  5. If nonce <= high_watermark: drop (replay/reorder)
+  6. Update high_watermark = nonce
+  7. Decrypt bytes 25 onward: AES-CTR(circuit_key, iv=nonce||zeros)
+  8. HEADER REWRITE: Reconstruct outbound packet:
+       type(1) + outbound_link_cid(16) + nonce(8) + decrypted_payload
+     Bytes 1-16 MUST be replaced with entry.outbound_link_cid.
+     Never forward the ingress link_cid downstream.
+  9. Forward to next_hop
+  10. Update last_active for TTL tracking
+
+Exit node (first sender on return path):
+
+  Does NOT perform lookup. Uses its stored outbound_link_cid (which
+  equals the first return relay's inbound_link_cid) to set bytes 1-16
+  when creating packets per §4 crypto layering.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+9. CLIENT DECRYPTION
+
+The client stores circuit state keyed by its own inbound_link_cid:
+
+  pending_circuits: {
+    client_inbound_link_cid: {
+      "logical_circuit": bytes,       # local only, never on wire
+      "exit_key": bytes,
+      "relay_keys": [bytes, ...],     # retained for re-establish
+      "nonce_watermark": int,
+      "corruption_count": int,
+    }
+  }
+
+On receiving a circuit packet:
+
+  1. Read link_cid from bytes 1-16
+  2. Look up pending_circuits[link_cid]
+  3. Read nonce from bytes 17-24
+  4. If nonce <= nonce_watermark: discard
+  5. Update nonce_watermark
+  6. Peel all layers: apply AES-CTR with each relay key (outermost
+     first), then exit key last
+  7. Read inner_len (2 bytes) and magic (4 bytes)
+  8. If magic != 0x504F5232: increment corruption counter, discard
+  9. If corruption_count >= 3 consecutive: re-establish circuit
+  10. Reset corruption counter on successful magic check
+  11. Extract token_data = plaintext[6 : 6 + inner_len]
+  12. Deliver token_data to application
+
+Re-establishment creates a NEW logical_circuit and NEW link CIDs
+for all hops. Old link_cids MUST NOT be reused.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+10. CIRCUIT LIFECYCLE
+
+10.1 Creation
+
+  During packet_create_repliable(), the client:
+    a. Generates logical_circuit (16 bytes, client-local, never on wire)
+    b. For each return-path hop (exit, then relays toward client,
+       then client as terminal):
+         - inbound_link_cid  (random 16 bytes)
+         - key_seed           (random 16 bytes)
+         - outbound_link_cid  (random 16 bytes, except bindings below)
+    c. Enforces link binding invariants:
+         exit.outbound          = first_return_relay.inbound
+         relay_i.outbound       = relay_{i-1}.inbound
+         last_relay.outbound    = client.inbound
+    d. Derives circuit_key per hop via HKDF (§5)
+    e. Includes per-hop setup fields in the corresponding forward
+       AEAD routing
+    f. Stores: logical_circuit, client.inbound_link_cid, exit_key,
+       relay_keys, nonce_watermark, corruption_count
+
+  During forward processing, each relay and the exit extract the
+  circuit fields from their decrypted AEAD routing and call
+  register_circuit(inbound_link_cid, circuit_key, next_hop,
+  outbound_link_cid, ttl).
+
+10.2 Active streaming
+
+  The exit receives LLM tokens via HTTP SSE. For each token:
+    a. Increments the nonce counter
+    b. Frames: inner_len(2) + magic(4) + token_data + padding
+    c. Encrypts with key_exit only (single layer)
+    d. Prepends type byte (0x01) + exit.outbound_link_cid + nonce
+    e. Sends to first relay on return path
+
+  Each relay adds its encryption layer and rewrites link_cid per §8.
+
+10.3 Keepalive
+
+  If no token arrives within TTL/3 seconds, the exit sends a
+  keepalive packet: inner_len=0, magic="POR2", rest is random
+  padding. Keepalives increment the nonce counter and are
+  indistinguishable from token packets (fixed size, same format).
+  Only the exit sends keepalives — relays just forward.
+
+10.4 Teardown
+
+  Circuits expire via per-circuit TTL (from setup, default 120
+  seconds of inactivity). CircuitTable.evict_expired() handles
+  cleanup. No explicit teardown message for MVP.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+11. ERROR HANDLING
+
+11.1 Relay lost circuit state (reboot, RAM flush)
+
+  Relay has no entry for the inbound link_cid. Packet is dropped.
+  Client detects the stall, times out, and re-establishes with a
+  new forward Outfox packet (new logical_circuit, new link CIDs).
+
+11.2 Packet loss (network drop)
+
+  Nonce gap. Subsequent packets have higher nonces — relays accept
+  them (gaps allowed). Lost tokens are missing from the SSE stream.
+  Application layer handles incomplete JSON events by discarding
+  partial data and resuming at the next event boundary.
+
+11.3 TTL expiry during long generation
+
+  Prevented by keepalive packets (§10.3). If keepalives also fail,
+  the circuit expires at all relays. Client times out and
+  re-establishes.
+
+11.4 Active tampering (bit flip in transit)
+
+  AES-CTR is malleable — a flipped bit in ciphertext flips the
+  corresponding plaintext bit. The magic field catches most
+  tampering (2^-32 false negative rate). The application layer
+  should validate token content independently. This is an accepted
+  weakness of the symmetric return path.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+12. RESOURCE LIMITS
+
+  Max circuits per node:    1024 (bounded CircuitTable)
+  Link CID uniqueness:      inbound_link_cid unique per relay table
+                            entry; MUST NOT repeat across hops on
+                            the wire for the same logical_circuit
+  Max TTL:                  300 seconds
+  Default TTL:              120 seconds (CIRCUIT_TTL_SECONDS)
+  Memory per circuit:       ~96 bytes (key + next_hop + outbound_cid
+                            + watermark + ts + ttl)
+  Total memory at capacity: ~96 KB per node (acceptable)
+
+  If CircuitTable is full, new registrations evict the oldest entry
+  (LRU). This prevents memory exhaustion from circuit-flooding DoS.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+13. WORKED EXAMPLE
+
+Return path: Exit → Relay B → Relay A → Client
+(Forward path was Client → Relay A → Relay B → Exit)
+
+Client generates:
+
+  logical_circuit = L (never on wire)
+
+  Client:   inbound = C_cli
+  Relay A:  inbound = C_A_in,  outbound = C_cli
+  Relay B:  inbound = C_B_in,  outbound = C_A_in
+  Exit:     inbound = (unused), outbound = C_B_in
+
+Streaming packet from Exit toward Client:
+
+  Exit sends:    [0x01 | C_B_in | nonce | Enc(key_exit, ...)]
+  Relay B recv:  lookup C_B_in, peel, rewrite → [0x01 | C_A_in | ...]
+  Relay A recv:  lookup C_A_in, peel, rewrite → [0x01 | C_cli  | ...]
+  Client recv:   lookup C_cli, peel key_A + key_B + key_exit, verify magic
+
+Colluding Relay A + Exit (non-adjacent): Relay A sees C_A_in and
+C_cli. Exit sees C_B_in. No shared identifier — correlation requires
+timing analysis, not identifier matching.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+14. IMPLEMENTATION STATUS (PACKET TESTS VS PROCESS WIRE)
+
+Implemented in core packet helpers and test-only packet utility:
+
+  OutfoxParams.py    derive_circuit_key()                ✓
+  OutfoxParams.py    CIRCUIT_MAGIC, CIRCUIT_TYPE         ✓
+  OutfoxNode.py      circuit_packet_create/process       ✓
+  OutfoxNode.py      circuit_packet_decrypt              ✓
+  OutfoxNode.py      CircuitStream (send/keepalive/chunk)✓
+  OutfoxNode.py      outfox_process + on_circuit callback✓
+  OutfoxClient.py    _build_header with circuit fields   ✓
+  OutfoxClient.py    packet_create_repliable + circuit   ✓
+  tests/mixnet_test_network.py CircuitTable (LRU, TTL)            ✓
+  tests/mixnet_test_network.py MixNode type-byte dispatch         ✓
+  tests/mixnet_test_network.py Client circuit decrypt + re-establish✓
+  tests/mixnet_test_network.py MixnetTestNetwork circuit stream routing   ✓
+  removed review proxy Circuit streaming regression path ✓
+
+Implemented in packet helper/test utility code:
+
+  OutfoxParams.py    derive_circuit_key info → "circuit"
+  OutfoxClient.py    _build_header: inbound + outbound link CIDs
+  OutfoxClient.py    packet_create_repliable: generate bound CIDs
+  OutfoxNode.py      outfox_process: extract inbound + outbound CIDs
+  OutfoxNode.py      circuit_packet_process: header rewrite
+  tests/mixnet_test_network.py CircuitTable: store outbound_link_cid
+  tests/mixnet_test_network.py Client: key by client.inbound_link_cid
+  Tests:             link binding invariants, header rewrite per hop,
+                     non-adjacent collusion regression test
+
+Remaining process-wire work:
+
+  Transport daemon   Persistent peer connections and binary frame carrier
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+15. IMPLEMENTATION ORDER
+
+Phase 1: Primitives                                          ✓ DONE
+Phase 2: Circuit setup in forward path                       ✓ DONE
+Phase 2.5: Per-hop link circuit identifiers in packet tests   ✓ DONE
+Phase 2.6: Per-hop link IDs in production process wire        ← NEXT
+Phase 3: Client integration                                  ✓ DONE
+Phase 4: Test utility wiring                                  ✓ DONE
+Phase 5: Streaming behavior in process/test paths             ✓ DONE

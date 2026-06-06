@@ -1,0 +1,332 @@
+{
+  "item": "15.6",
+  "generated_at": "2026-06-04T09:56:48Z",
+  "run_on": "local",
+  "total": 20,
+  "ok": 20,
+  "fail": 0,
+  "same_prompt": "In one sentence, name one Monet painting technique.",
+  "gap_sec": 1,
+  "runs": [
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet employed **broken brushwork**, applying small, loose strokes of pure color side by side to capture the fleeting effects of light and atmosphere rather than blending colors smoothly on the canvas.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 4,
+      "label": "same-1"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet employed **loose, visible brushstrokes** to capture the fleeting effects of light and atmosphere rather than precise detail.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "same-2"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet famously used **broken brushwork**, applying small, thick strokes of pure, unmixed color side by side to capture the fleeting effects of light and atmosphere.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 4,
+      "label": "same-3"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet used **broken brushwork**, applying small, loose strokes of pure color side by side to capture the fleeting effects of light and atmosphere rather than blending colors smoothly.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "same-4"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet famously used **broken brushwork**, applying small, loose strokes of pure color side by side to capture the fleeting effects of light and atmosphere rather than blending colors smoothly on the canvas.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 4,
+      "label": "same-5"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet employed **broken brushwork**, applying small, loose strokes of pure color side by side to capture the fleeting effects of light and atmosphere rather than blending colors smoothly.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "same-6"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet employed **loose, rapid brushstrokes** to capture the fleeting effects of light and atmosphere rather than precise details.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "same-7"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet famously used loose, rapid brushstrokes of pure, unmixed color placed side by side to capture the fleeting effects of light and atmosphere, a technique central to Impressionism.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "same-8"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet used rapid, loose brushstrokes to capture the fleeting effects of light and atmosphere on his subjects.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 4,
+      "label": "same-9"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet used **broken brushwork**, applying small, loose strokes of pure color side by side to capture the fleeting effects of light and atmosphere rather than blending colors smoothly.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "same-10"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one sentence, name one Monet painting technique.",
+      "response_text": "Monet used loose, rapid brushstrokes to capture the fleeting effects of light and atmosphere, a hallmark technique of Impressionism.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "varied-1"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "What is broken brushwork in impressionist painting?",
+      "response_text": "## Broken Brushwork in Impressionist Painting\n\n**Broken brushwork** refers to a technique where paint is applied in small, distinct, separate strokes that are left visibly separate rather than blended smoothly together. The brushstrokes remain individually identifiable on the canvas surface.\n\n### Key Characteristics\n\n- **Visible, discrete strokes** \u2014 dabs, patches, or short marks of color that don't blend seamlessly into each other\n- **Optical mixing** \u2014 colors placed side by side are mixed by the viewer's eye at a distance, rather than physically mixed on the palette or canvas\n- **Texture and surface interest** \u2014 the paint surface has a tactile, active quality\n- **Spontaneity** \u2014 strokes convey a sense of immediacy and the artist's direct response to what they observed\n\n### How It Works\n\nRather than smoothly blending a shadow transition, for example, an Impressionist might place strokes of blue, violet, and green adjacent to one another, allowing the eye to perceive depth and color variation naturally.\n\n### Why Impressionists Used It\n\n- To capture **fleeting light effects** and atmosphere quickly\n- To suggest **",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 11,
+      "label": "varied-2"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "How did Monet use light in his haystack series?",
+      "response_text": "## Monet's Use of Light in the Haystacks Series\n\nClaude Monet's **Haystacks** series (1890\u20131891), consisting of around 25 paintings, represents one of the most systematic explorations of light in art history.\n\n### Core Approach\n\nMonet treated the haystacks essentially as **neutral subjects** \u2014 stable, consistent forms that would allow him to focus entirely on how light transformed their appearance. The stacks themselves were almost incidental; atmospheric light was the true subject.\n\n### Key Techniques\n\n**Serial Observation**\n- Monet worked on multiple canvases simultaneously, switching between them as conditions changed\n- He documented the same subjects across different **times of day**, **seasons**, and **weather conditions**\n- This allowed direct comparison of how light altered color, shadow, and form\n\n**Color as Light**\n- He abandoned conventional brown/grey shadows, instead using **complementary colors** (purples, blues, oranges) to render shadows\n- Morning light produced cool, blue-tinged tones; afternoon light yielded warm golds and oranges\n- Winter scenes showed how low-angled sunlight created long, dramatically colored",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 8,
+      "label": "varied-3"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "Name one characteristic of impressionist color theory.",
+      "response_text": "One key characteristic of Impressionist color theory is the use of **broken color (or optical color mixing)** \u2014 rather than blending pigments smoothly on the palette, Impressionist painters placed small, distinct strokes of pure, unmixed colors side by side on the canvas, allowing the viewer's eye to optically blend them at a distance. This technique was informed by the color science of the time (such as Chevreul's theories on simultaneous contrast), and it produced a sense of vibration, luminosity, and atmospheric light that traditional blended painting could not achieve.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 6,
+      "label": "varied-4"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "How did Monet paint water lilies in terms of color and brushwork?",
+      "response_text": "## Monet's Water Lily Technique\n\n### Color Approach\n\nMonet worked with a highly chromatic, **non-naturalistic palette** that reflected his Impressionist principles and his study of light and atmospheric conditions:\n\n- He used **complementary color contrasts** extensively \u2014 oranges against blues, purples against yellows \u2014 to create vibrancy rather than mixing colors to neutral tones\n- Shadows were rendered in **cool purples, blues, and greens** rather than brown or black, reflecting his understanding that shadows contain reflected color\n- He captured **simultaneous reflection** \u2014 the surface of the pond showing sky, clouds, and surrounding vegetation \u2014 meaning color was constantly shifting and layered\n- As his **cataracts** progressed (especially post-1912), his palette shifted toward warmer, murkier reds and yellows, and his perception of blue diminished noticeably\n\n### Brushwork\n\n- In the early water lily works, strokes were relatively **distinct and directional**, following the forms of leaves and ripples\n- In the large-scale **Grandes D\u00e9corations** (the panels now in the Orangerie, Paris), brushwork became",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 9,
+      "label": "varied-5"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "Describe Monet approach to water reflections in one sentence.",
+      "response_text": "Monet captured water reflections not as literal mirror images but as shimmering, fragmented planes of color and light, using loose, gestural brushstrokes to convey the ephemeral, ever-changing surface of water rather than precise optical accuracy.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 4,
+      "label": "varied-6"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "What is a key difference between Monet and classical landscape painting?",
+      "response_text": "A key difference lies in the **approach to light, atmosphere, and the act of perception itself**.\n\n## Classical Landscape Painting (e.g., Poussin, Claude Lorrain, Constable)\n- Emphasized **structural composition** \u2014 carefully arranged foreground, middle ground, and background\n- Depicted landscapes as **stable, knowable, idealized** settings, often with narrative or allegorical content\n- Prioritized **draftsmanship and contour**, with form defined by clear line\n- Painted largely **in the studio** from sketches and memory, constructing an \"ideal\" scene\n- Color served to **describe objects** accurately and convincingly\n\n## Monet and Impressionism\n- Prioritized **the transient quality of light** at a specific moment \u2014 famously painting the same subject (haystacks, Rouen Cathedral) dozens of times under different conditions\n- The **subject becomes almost secondary** to the perception of it \u2014 light and atmosphere *are* the subject\n- Used **broken, visible brushstrokes** that dissolve firm outlines, suggesting how the eye actually registers a scene\n- Painted **en plein air** (outd",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 8,
+      "label": "varied-7"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "How did Monet capture atmosphere in his garden paintings?",
+      "response_text": "# Monet's Atmospheric Techniques in Garden Paintings\n\n## Core Painterly Approaches\n\n**Broken Brushwork**\nMonet abandoned smooth blending in favor of distinct, visible strokes that collectively suggest light and movement rather than defining precise forms. This allowed the eye to mix colors optically rather than on the canvas.\n\n**Color Over Line**\nHe largely eliminated black outlines, letting edges dissolve through juxtaposed complementary colors \u2014 oranges against blues, purples against yellows \u2014 creating vibration that mimicked the way light actually behaves at boundaries.\n\n**Tonal Relationships**\nRather than depicting objects in isolation, he painted the *relationships* between tones, essentially recording how light unified everything within a scene at a specific moment.\n\n## Temporal and Perceptual Concerns\n\n- He worked in **series** (the Water Lilies, the Japanese bridge) specifically to study how the same subject transformed under different light conditions and times of day\n- He often worked on multiple canvases simultaneously, rotating them as light shifted\n- He was capturing a **duration** rather than a frozen instant \u2014 the felt experience of being in the garden\n\n## Giver",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 9,
+      "label": "varied-8"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "Name one material Monet favored on his palette.",
+      "response_text": "Claude Monet favored **lead white** (flake white) on his palette. It was a foundational pigment he used extensively for mixing tints and achieving luminous, opaque light effects in his paintings.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 3,
+      "label": "varied-9"
+    },
+    {
+      "attestation": {
+        "platform": "nitro",
+        "value_x_prefix": "5faf834eac20adaf..."
+      },
+      "degraded_anonymity": false,
+      "fallback_used": false,
+      "ok": true,
+      "prompt": "In one phrase, what is optical color mixing in impressionism?",
+      "response_text": "**The visual blending of separate pure color dashes by the viewer's eye at a distance**, rather than mixing pigments on the palette.",
+      "selected_peer_id": "h4a30b46453eb7bd",
+      "url": "https://5faf834eac20.aeon.site",
+      "via_mailbox": false,
+      "elapsed_s": 4,
+      "label": "varied-10"
+    }
+  ]
+}

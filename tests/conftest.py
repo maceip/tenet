@@ -1,6 +1,8 @@
-"""Shared fixtures for P-OR integration tests."""
+"""Shared fixtures for tenet integration tests."""
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
@@ -13,6 +15,20 @@ def wire_cluster_factory(tmp_path):
         return write_wire_cluster(tmp_path, node_ids=node_ids, payload_size=payload_size)
 
     return _factory
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-live",
+        action="store_true",
+        default=False,
+        help="run tests marked live (production attested matcher)",
+    )
+
+
+def pytest_configure(config):
+    if config.getoption("--run-live") or os.environ.get("TENET_RUN_LIVE"):
+        config.option.markexpr = "live"
 
 
 def pytest_collection_modifyitems(config, items):

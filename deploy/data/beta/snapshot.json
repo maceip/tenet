@@ -1,0 +1,176 @@
+{
+  "version": "por.directory_snapshot.v1",
+  "generated_at": "2026-06-04T04:15:00+00:00",
+  "records": [
+    {
+      "manifest": {
+        "version": "por.memory_manifest.v1",
+        "peer_id": "alpha-seed-art",
+        "created_at": "2026-06-04T04:15:00+00:00",
+        "roots": [
+          "7a65b070b0cc6be1ffbe1952"
+        ],
+        "file_count": 1,
+        "byte_count": 118,
+        "chunk_count": 1,
+        "token_count": 12,
+        "file_types": {
+          ".md": 1
+        },
+        "top_terms": [
+          [
+            "monet",
+            1
+          ],
+          [
+            "degas",
+            1
+          ],
+          [
+            "renoir",
+            1
+          ],
+          [
+            "developed",
+            1
+          ],
+          [
+            "impressionism",
+            1
+          ],
+          [
+            "paris",
+            1
+          ],
+          [
+            "brushwork",
+            1
+          ],
+          [
+            "light",
+            1
+          ],
+          [
+            "color",
+            1
+          ],
+          [
+            "canvas",
+            1
+          ],
+          [
+            "defined",
+            1
+          ],
+          [
+            "movement",
+            1
+          ]
+        ],
+        "corpus_root": "66f28a4da1db9fbc27ee10487940ce64bbfe43fa1ffa1568e80e94ec8e2d76b1",
+        "index_digest": "735ca92d096f88a6b6a279a8f44ed649b9fca114bec4ceb41d21314eef37f7d1",
+        "privacy": {
+          "raw_text_published": false,
+          "sources_in_manifest": false,
+          "public_terms": true,
+          "commitment_note": "Merkle root commits to salted chunk hashes. Proofs show index commitment, not expertise or answer quality."
+        }
+      },
+      "handle": {
+        "version": "por.opaque_handle_record.v1",
+        "handle": "h4a30b46453eb7bd",
+        "mailbox_id": "mailbox-beta",
+        "issued_at": 1780546746.607726,
+        "expires_at": 1780633146.607726,
+        "signature": "9b5d6549a05b0804fbbd169a0b70e3818aee6d234730531af6cfbb4c79fed58c"
+      }
+    },
+    {
+      "manifest": {
+        "version": "por.memory_manifest.v1",
+        "peer_id": "alpha-seed-security",
+        "created_at": "2026-06-04T04:15:00+00:00",
+        "roots": [
+          "247ff8a440061c674033e28c"
+        ],
+        "file_count": 1,
+        "byte_count": 118,
+        "chunk_count": 1,
+        "token_count": 13,
+        "file_types": {
+          ".md": 1
+        },
+        "top_terms": [
+          [
+            "sphinx",
+            1
+          ],
+          [
+            "mixnet",
+            1
+          ],
+          [
+            "outfox",
+            1
+          ],
+          [
+            "sealed",
+            1
+          ],
+          [
+            "transport",
+            1
+          ],
+          [
+            "opaque",
+            1
+          ],
+          [
+            "handles",
+            1
+          ],
+          [
+            "attested",
+            1
+          ],
+          [
+            "nitro",
+            1
+          ],
+          [
+            "matcher",
+            1
+          ],
+          [
+            "privacy-preserving",
+            1
+          ],
+          [
+            "expert",
+            1
+          ],
+          [
+            "routing",
+            1
+          ]
+        ],
+        "corpus_root": "42fccdc5bab8128006888753980714ca67fef802a30fe414a011c521c99fb96f",
+        "index_digest": "6c9aafbc537aefc172cbd2d747029bc823fe48c9040ada1aabfb5ab1633740bf",
+        "privacy": {
+          "raw_text_published": false,
+          "sources_in_manifest": false,
+          "public_terms": true,
+          "commitment_note": "Merkle root commits to salted chunk hashes. Proofs show index commitment, not expertise or answer quality."
+        }
+      },
+      "handle": {
+        "version": "por.opaque_handle_record.v1",
+        "handle": "h0a0a24b9434a966",
+        "mailbox_id": "mailbox-beta",
+        "issued_at": 1780546746.607726,
+        "expires_at": 1780633146.607726,
+        "signature": "ea8028b43ce7dfbe15976258c66148aa53906c42197bcb8704ebcc2b43ee3c6e"
+      }
+    }
+  ]
+}

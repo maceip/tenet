@@ -1,18 +1,24 @@
+import re
+from pathlib import Path
+
 from setuptools import find_packages, setup
 
-import sphinxmix
+_version_src = Path(__file__).parent.joinpath("tenet", "packet", "__init__.py").read_text(encoding="utf-8")
+VERSION = re.search(r'^VERSION\s*=\s*"([^"]+)"', _version_src, re.MULTILINE).group(1)
 
 if __name__ == "__main__":
-      
-      setup(name='sphinxmix',
-            version=sphinxmix.VERSION,
-            description='A Python implementation of the Sphinx mix packet format.',
+
+      setup(name='tenet',
+            version=VERSION,
+            description='tenet — an expert-routing mixnet (Sphinx packet format core).',
             author='George Danezis',
             author_email='g.danezis@ucl.ac.uk',
             url=r'http://sphinxmix.readthedocs.io/en/latest/',
-            packages=find_packages(include=["sphinxmix", "sphinxmix.*", "por", "por.*"]),
+            packages=find_packages(include=["tenet", "tenet.*"]),
             license="2-clause BSD",
-            long_description="""A Python implementation of the Sphinx mix packet format.
+            long_description="""tenet routes a question to the peer most likely to answer it well,
+            over a Sphinx-format mixnet. The packet layer is a Python implementation of the
+            Sphinx mix packet format.
 
             For full documentation see: http://sphinxmix.readthedocs.io/en/latest/
             """,
@@ -37,11 +43,11 @@ if __name__ == "__main__":
             ],
             entry_points={
                   "console_scripts": [
-                        "por=por.daemon.main:main",
-                        "por-relay=por.daemon.main:legacy_relay_main",
-                        "por-expert=por.daemon.main:legacy_expert_main",
-                        "por-client=por.daemon.main:legacy_client_main",
-                        "por-directory=por.daemon.directory:main",
+                        "tenet=tenet.edges.cli.main:main",
+                        "tenet-relay=tenet.edges.cli.main:legacy_relay_main",
+                        "tenet-expert=tenet.edges.cli.main:legacy_expert_main",
+                        "tenet-client=tenet.edges.cli.main:legacy_client_main",
+                        "tenet-directory=tenet.edges.cli.directory:main",
                   ],
             },
       )

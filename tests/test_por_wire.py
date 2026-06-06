@@ -11,17 +11,17 @@ import time
 
 import pytest
 
-from por.node_runtime import WireNodeRuntime
+from tenet.mixnet.node_runtime import WireNodeRuntime
 
-from por.client import send_prepared_envelope
-from por.config import ClusterConfig
-from por.directory import PublicManifestDirectory
-from por.envelope import PromptRequestEnvelope
-from por.expert_mode import ExpertModeConfig, prepare_expert_mode_request
-from por.expert_route import PeerObservation, RouteIntent
-from por.memory_index import IndexConfig, build_memory_index
-from por.node_runtime import WireNodeRuntime
-from por.wire_frame import (
+from tenet.experts.client import send_prepared_envelope
+from tenet.config import ClusterConfig
+from tenet.experts.directory import PublicManifestDirectory
+from tenet.envelope import PromptRequestEnvelope
+from tenet.experts.expert_mode import ExpertModeConfig, prepare_expert_mode_request
+from tenet.experts.expert_route import PeerObservation, RouteIntent
+from tenet.experts.memory_index import IndexConfig, build_memory_index
+from tenet.mixnet.node_runtime import WireNodeRuntime
+from tenet.mixnet.wire_frame import (
     CIRCUIT,
     FORWARD,
     decode_datagram,
@@ -98,7 +98,7 @@ def test_truncated_forward_header_rejected():
 
 def test_corrupt_reach_tag_no_crash(tmp_path, capsys):
     """Corrupt REACH-range tag doesn't crash or dispatch to mix."""
-    from por.reach_wire import REACH_REGISTER
+    from tenet.mixnet.reach_wire import REACH_REGISTER
     cluster = static_wire_cluster(("relay1", "relay"), payload_size=2048)
     runtime = WireNodeRuntime(cluster, "relay1", role="relay")
     reach_calls = []
@@ -115,8 +115,8 @@ def test_corrupt_reach_tag_no_crash(tmp_path, capsys):
 
 def test_circuit_replay_nonce_rejected(tmp_path, capsys):
     """Duplicate nonce on circuit packet → circuit_replay event."""
-    from sphinxmix.OutfoxParams import OutfoxParams
-    from sphinxmix.OutfoxNode import circuit_packet_create
+    from tenet.packet.OutfoxParams import OutfoxParams
+    from tenet.packet.OutfoxNode import circuit_packet_create
     from os import urandom
 
     cluster = static_wire_cluster(("relay1", "relay"), payload_size=512)
@@ -155,7 +155,7 @@ def test_shutdown_stops_runtime():
 @pytest.mark.integration
 @pytest.mark.product
 def test_binary_wire_subprocess_uses_client_send_path(tmp_path, wire_cluster_factory):
-    """Production path: por relay/expert subprocesses + send_prepared_envelope."""
+    """Production path: tenet relay/expert subprocesses + send_prepared_envelope."""
     config_path, harness = wire_cluster_factory("relay1", "relay2", "expert_art")
     nodes = harness["nodes"]
     node_ids = ("relay1", "relay2", "expert_art")
@@ -181,7 +181,7 @@ def test_binary_wire_subprocess_uses_client_send_path(tmp_path, wire_cluster_fac
         role = "expert" if node_id.startswith("expert") else "relay"
         procs.append(
             subprocess.Popen(
-                [sys.executable, "-m", "por", role, "--config", str(config_path), "--node-id", node_id],
+                [sys.executable, "-m", "tenet", role, "--config", str(config_path), "--node-id", node_id],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

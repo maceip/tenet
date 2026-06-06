@@ -1,7 +1,7 @@
 """QUIC demux_datagram unit tests — no aioquic required."""
 
-from por.quic_transport import demux_datagram
-from por.reach_wire import REACH_REGISTER, REACH_HEARTBEAT
+from tenet.mixnet.quic_transport import demux_datagram
+from tenet.mixnet.reach_wire import REACH_REGISTER, REACH_HEARTBEAT
 
 
 def test_reach_dispatched_to_on_reach():

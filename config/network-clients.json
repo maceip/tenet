@@ -1,0 +1,24 @@
+{
+  "version": "por.network_clients.v1",
+  "reach_relay_host": "3.121.69.82",
+  "matcher_url": "https://5faf834eac20.aeon.site/",
+  "clients": [
+    {
+      "client_id": "windows-native-lan",
+      "host": "192.168.0.180",
+      "ssh_user": "mac",
+      "platform": "windows-x86_64",
+      "binary": "dist/tenet-windows-x86_64.exe",
+      "note": "Native Windows LAN client proof passed from stripped PATH on 2026-06-04"
+    },
+    {
+      "client_id": "windows-wsl-linux-lan",
+      "host": "192.168.0.180",
+      "ssh_user": "mac",
+      "platform": "linux-x86_64",
+      "wsl": true,
+      "binary": "dist/tenet-linux-x86_64",
+      "note": "Linux binary proof passed under WSL mirrored networking on 2026-06-04; Docker/Orb on Mac attests but loses UDP relay return"
+    }
+  ]
+}

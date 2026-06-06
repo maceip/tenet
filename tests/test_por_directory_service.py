@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from por.config import PorConfig
-from por.daemon.directory import make_directory_handler, run_directory_from_daemon
+from tenet.config import PorConfig
+from tenet.edges.cli.directory import make_directory_handler, run_directory_from_daemon
 from tests.harness import mixnet_harness
-from por.directory import (
+from tenet.experts.directory import (
     DIRECTORY_SNAPSHOT_VERSION,
     PUBLIC_SNAPSHOT_V1,
     DirectorySnapshot,
@@ -16,14 +16,9 @@ from por.directory import (
     load_public_snapshot_directory,
     load_records_from_snapshot_file,
 )
-from por.expert_route import PeerObservation, RouteIntent, plan_expert_route
-from por.memory_index import IndexConfig, build_memory_index
-from por.peer_address import (
-    PeerAddressRelay,
-    UdpEndpoint,
-    peer_address_record_from_dict,
-    verify_record_signature,
-)
+from tenet.experts.expert_route import PeerObservation, RouteIntent, plan_expert_route
+from tenet.handles import OpaqueHandleIssuer
+from tenet.experts.memory_index import IndexConfig, build_memory_index
 
 
 def _manifest(tmp_path, peer_id, text):
@@ -115,25 +110,41 @@ def test_public_snapshot_directory_loads_from_http(tmp_path):
         assert result.candidates[0].manifest.peer_id == "peer-art"
 
 
-def test_public_snapshot_directory_round_trips_peer_address_record_over_http(tmp_path):
+def test_public_snapshot_directory_rejects_peer_address_record(tmp_path):
+    manifest = _manifest(tmp_path, "peer-art", "Monet Impressionism color light.")
+    path = tmp_path / "directory-snapshot.json"
+    raw = PublicManifestDirectory.from_manifests([manifest]).snapshot(
+        generated_at="2026-05-30T00:00:00+00:00",
+    ).to_dict()
+    raw["records"][0]["peer_address"] = {"peer_id": "peer-art"}
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(DirectorySnapshotFormatError, match="peer_address"):
+        load_public_snapshot_directory(path)
+
+
+def test_public_snapshot_directory_round_trips_handle_record_without_peer_address(tmp_path):
     manifest = _manifest(tmp_path, "peer-art", "Monet Impressionism color light.")
     directory = PublicManifestDirectory.from_manifests([manifest])
-    peer_record, secret = _peer_address_public_record("peer-art")
+    handle_record = OpaqueHandleIssuer(b"directory-handle-secret").record(
+        peer_id="peer-art",
+        manifest_digest=manifest.index_digest,
+        mailbox_id="mailbox-a",
+        now=1000.0,
+    ).to_public_dict()
     path = tmp_path / "directory-snapshot.json"
     directory.snapshot(
         generated_at="2026-05-30T00:00:00+00:00",
-    ).with_peer_address_records({"peer-art": peer_record}).save(path)
+    ).with_handle_records({"peer-art": handle_record}).save(path)
     with mixnet_harness() as net:
         server = net.serve_http(make_directory_handler(path))
         url = f"http://127.0.0.1:{server.server_address[1]}/snapshot"
 
         loaded = load_public_snapshot_directory(url)
-        records = loaded.peer_address_records()
 
-        assert records["peer-art"]["signature"] == peer_record["signature"]
-        parsed = loaded.records[0].peer_address
-        assert parsed is not None
-        assert verify_record_signature(peer_address_record_from_dict(parsed), secret.hex())
+        assert loaded.handle_records()["peer-art"]["handle"] == handle_record["handle"]
+        assert loaded.records[0].handle == handle_record
+        assert "peer_address" not in json.loads(path.read_text())["records"][0]
 
 
 def test_http_snapshot_loader_enforces_size_limit(tmp_path):
@@ -192,11 +203,11 @@ def test_directory_daemon_registers_configured_supernodes(monkeypatch):
     )
     seen = {}
 
-    def fake_run_directory_server(**kwargs):
+    def recording_run_directory_server(**kwargs):
         seen.update(kwargs)
         return 0
 
-    monkeypatch.setattr("por.daemon.directory.run_directory_server", fake_run_directory_server)
+    monkeypatch.setattr("tenet.edges.cli.directory.run_directory_server", recording_run_directory_server)
 
     assert run_directory_from_daemon(config.daemon("directory-a"), config) == 0
 
@@ -205,11 +216,11 @@ def test_directory_daemon_registers_configured_supernodes(monkeypatch):
     assert seen["snapshot_path"] is None
 
 
-def test_directory_daemon_serves_configured_peer_address_record(monkeypatch, tmp_path):
+def test_directory_daemon_does_not_publish_configured_peer_address_record(monkeypatch, tmp_path):
     manifest = _manifest(tmp_path, "peer-art", "Monet Impressionism color light.")
     snapshot_path = tmp_path / "directory-snapshot.json"
     PublicManifestDirectory.from_manifests([manifest]).save_snapshot(snapshot_path)
-    peer_record, secret = _peer_address_public_record("peer-art")
+    peer_record = {"peer_id": "peer-art", "signature": "legacy-direct-address"}
     config = PorConfig.from_dict(
         {
             "version": "por.config.v1",
@@ -233,37 +244,13 @@ def test_directory_daemon_serves_configured_peer_address_record(monkeypatch, tmp
     )
     seen = {}
 
-    def fake_run_directory_server(**kwargs):
+    def recording_run_directory_server(**kwargs):
         seen.update(kwargs)
         return 0
 
-    monkeypatch.setattr("por.daemon.directory.run_directory_server", fake_run_directory_server)
+    monkeypatch.setattr("tenet.edges.cli.directory.run_directory_server", recording_run_directory_server)
 
     assert run_directory_from_daemon(config.daemon("directory-a"), config) == 0
 
-    snapshot = DirectorySnapshot.from_json(seen["snapshot_json"])
-    assert snapshot.records[0].peer_address is not None
-    assert snapshot.records[0].peer_address["signature"] == peer_record["signature"]
-    assert verify_record_signature(
-        peer_address_record_from_dict(snapshot.records[0].peer_address),
-        secret.hex(),
-    )
+    assert seen["snapshot_json"] is None
     assert seen["snapshot_path"] == str(snapshot_path)
-
-
-
-
-def _peer_address_public_record(peer_id):
-    secret = b"directory-peer-address-secret"
-    relay = PeerAddressRelay(
-        relay_id="bootstrap-1",
-        relay_endpoint=UdpEndpoint("203.0.113.10", 4433),
-        secret=secret,
-    )
-    challenge = relay.request_registration(
-        peer_id=peer_id,
-        observed_endpoint=UdpEndpoint("127.0.0.1", 7003),
-        now=900.0,
-    )
-    record = relay.confirm_registration(challenge, now=901.0).to_public_dict()
-    return record, secret
