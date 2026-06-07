@@ -208,7 +208,7 @@ def make_berlin_reply_handler(api_key: str | None, model: str):
             return [CANNED_ANSWER]
         # Live path with self-heal: if Claude fails for ANY reason, fall back to the
         # real captured verdict so the demo can't hang or go blank on stage.
-        _ev("MODEL", "combining local knowledge + frontier model…")
+        _ev("MODEL", "combining local knowledge + Opus 4.8 High…")
         try:
             ans = _claude(api_key, model, BERLIN_CONTEXT, prompt)
         except Exception:
