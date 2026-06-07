@@ -111,7 +111,7 @@ ROUTE_LOG = [
     ("SEAL", "encrypting the query into a fixed-size Outfox packet (2348 B)"),
     ("RELAY", "forward hop: client → relay  (relay cannot read the payload)"),
     ("RELAY", "opaque_forward_to_peer → reachability-relayed expert exit"),
-    ("EXPERT", "expert opens the intent, combines local knowledge + frontier model"),
+    ("EXPERT", "expert opens the intent, combines local knowledge + Opus 4.8 High"),
     ("RETURN", "answer sealed into reply blocks, streamed back over the SURB"),
     ("OK", "circuit complete · packets verified · fallback_used = False"),
 ]
