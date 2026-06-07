@@ -9,11 +9,34 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PY="$ROOT/.venv/bin/python"
 LOG="/tmp/tenet-expert-pane.log"
 SESSION="tenet-split"
 
-[ -x "$PY" ] || PY="python3"
+# Self-healing python: verify it can import the demo; rebuild a Python-3.13 venv
+# with the deps if not. Never crashes on a missing dep / wrong interpreter.
+DEPS='import tenet.mixnet.node_runtime, tenet.experts.client, nacl, kademlia'
+_works() { [ -x "$1" ] && "$1" -c "$DEPS" >/dev/null 2>&1; }
+resolve_python() {
+  for c in "$ROOT/.venv/bin/python" "$ROOT/build/demo-venv/bin/python"; do
+    _works "$c" && { echo "$c"; return 0; }
+  done
+  if command -v python3 >/dev/null 2>&1 && python3 -c "$DEPS" >/dev/null 2>&1; then echo python3; return 0; fi
+  echo "[split] one-time setup: building a venv with the demo deps (Python 3.13)…" >&2
+  if command -v uv >/dev/null 2>&1; then
+    { uv venv --python 3.13 "$ROOT/.venv" || uv venv "$ROOT/.venv"; } >/dev/null 2>&1 || true
+    uv pip install --python "$ROOT/.venv/bin/python" -q -e "$ROOT" \
+      kademlia dilithium-py "aioquic>=1.3.0" pynacl cryptography pqcrypto rpcudp py-algorand-sdk >/dev/null 2>&1 || true
+  else
+    { python3 -m venv "$ROOT/.venv" && "$ROOT/.venv/bin/pip" install -q -U pip \
+      && "$ROOT/.venv/bin/pip" install -q -e "$ROOT" kademlia dilithium-py "aioquic>=1.3.0" \
+         pynacl cryptography pqcrypto rpcudp py-algorand-sdk; } >/dev/null 2>&1 || true
+  fi
+  _works "$ROOT/.venv/bin/python" && { echo "$ROOT/.venv/bin/python"; return 0; }
+  echo "[split] could not set up the venv. Run once, then retry:" >&2
+  echo "      cd $ROOT && uv venv --python 3.13 .venv && uv pip install -e . kademlia dilithium-py 'aioquic>=1.3.0' py-algorand-sdk" >&2
+  return 1
+}
+PY="$(resolve_python)" || exit 1
 
 if ! command -v tmux >/dev/null 2>&1; then
   echo "[split] tmux not found — running single-pane present.py instead"
@@ -36,7 +59,7 @@ tmux set-option -t "$SESSION" pane-border-format " #{pane_title} "
 # the whole session (both panes) — no orphaned tail -f.
 tmux select-pane -t "$SESSION":0.0 -T "ASKER  ·  your agent"
 tmux send-keys -t "$SESSION":0.0 \
-  "clear; TENET_VERBOSE=1 TENET_REAL_PAY='${TENET_REAL_PAY:-}' TENET_PAY_TO='${TENET_PAY_TO:-}' TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2m── demo complete · Ctrl-b then & to exit ──\033[0m\n'" C-m
+  "clear; TENET_VERBOSE=1 TENET_REAL_PAY='${TENET_REAL_PAY:-}' TENET_PAY_TO='${TENET_PAY_TO:-}' TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2m── demo complete · Ctrl-b then & to exit ──\033[0m\n'; while :; do sleep 86400; done" C-m
 
 # RIGHT pane (1) = EXPERT
 tmux split-window -h -t "$SESSION":0
