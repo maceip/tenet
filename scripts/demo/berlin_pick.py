@@ -69,8 +69,8 @@ EXPERT_ID = "expert_berlin"
 # Silence asyncio/futures teardown chatter so the control-DHT overlay shutdown
 # never spills "Event loop is closed" / "Task was destroyed" onto the demo screen.
 import logging as _logging  # noqa: E402
-_logging.getLogger("asyncio").setLevel(_logging.CRITICAL)
-_logging.getLogger("concurrent.futures").setLevel(_logging.CRITICAL)
+for _n in ("asyncio", "concurrent.futures", "kademlia", "rpcudp", "tenet"):
+    _logging.getLogger(_n).setLevel(_logging.CRITICAL)
 
 # The optional control-DHT (Kademlia) overlay runs in its own daemon thread and
 # may fail to bind a derived port — non-fatal (routing uses matcher+reachability,

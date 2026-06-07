@@ -30,21 +30,23 @@ case "$CMD" in
   split)
     command -v tmux >/dev/null 2>&1 || { echo "[net] tmux required for split"; exit 1; }
     S="tenet-net"
+    pkill -f "scripts/demo/berlin_serve.py" 2>/dev/null || true   # kill any stale server (frees ports)
     tmux kill-session -t "$S" 2>/dev/null || true
-    rm -f "$DIR/askpack.json"
+    sleep 0.3
+    mkdir -p "$DIR"; rm -f "$DIR/askpack.json"
     tmux new-session -d -s "$S" -x "$(tput cols 2>/dev/null || echo 212)" -y "$(tput lines 2>/dev/null || echo 50)"
     tmux set-option -t "$S" status off
     tmux set-option -t "$S" pane-border-status top
     tmux set-option -t "$S" pane-border-format " #{pane_title} "
-    # LEFT = the EXPERT NODE process (persistent)
-    tmux select-pane -t "$S":0.0 -T "EXPERT NODE  ·  berlin_serve.py (process 1)"
-    tmux send-keys -t "$S":0.0 "clear; TENET_NET_DIR='$DIR' '$PY' '$ROOT/scripts/demo/berlin_serve.py'" C-m
-    # RIGHT = the ASKER process (waits for the node, then routes)
+    # LEFT (0) = ASKER — your agent (waits for the node, routes, one key exits both)
+    tmux select-pane -t "$S":0.0 -T "ASKER  ·  berlin_ask.py (process 1)"
+    tmux send-keys -t "$S":0.0 \
+      "clear; printf '  \033[2mconnecting to the expert node…\033[0m\n'; while [ ! -f '$DIR/askpack.json' ]; do sleep 0.3; done; sleep 1; TENET_NET_DIR='$DIR' '$PY' '$ROOT/scripts/demo/berlin_ask.py' $*; printf '\n  \033[2mpress any key to exit\033[0m'; read -rsn1; tmux kill-session -t '$S'" C-m
+    # RIGHT (1) = EXPERT NODE — the persistent server
     tmux split-window -h -t "$S":0
-    tmux select-pane -t "$S":0.1 -T "ASKER  ·  berlin_ask.py (process 2)"
-    tmux send-keys -t "$S":0.1 \
-      "clear; printf '  \033[2mwaiting for the expert node…\033[0m\n'; while [ ! -f '$DIR/askpack.json' ]; do sleep 0.3; done; sleep 1; TENET_NET_DIR='$DIR' '$PY' '$ROOT/scripts/demo/berlin_ask.py' $*; printf '\n  \033[2mpress any key to exit\033[0m'; read -rsn1; tmux kill-session -t '$S'" C-m
-    tmux select-pane -t "$S":0.1
+    tmux select-pane -t "$S":0.1 -T "EXPERT NODE  ·  berlin_serve.py (process 2)"
+    tmux send-keys -t "$S":0.1 "clear; TENET_NET_DIR='$DIR' '$PY' '$ROOT/scripts/demo/berlin_serve.py'" C-m
+    tmux select-pane -t "$S":0.0
     tmux attach -t "$S" ;;
   *)
     echo "usage: net.sh [split|serve|ask]"; exit 1 ;;

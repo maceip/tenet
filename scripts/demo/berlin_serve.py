@@ -46,10 +46,9 @@ from tenet.packet.OutfoxParams import OutfoxParams  # noqa: E402
 SHARE = Path(os.environ.get("TENET_NET_DIR", "/tmp/tenet-net"))
 RELAY_HOST = os.environ.get("RELAY_HOST", "127.0.0.1")
 EXPERT_HOST = os.environ.get("EXPERT_HOST", "127.0.0.1")
-RELAY_PORT = int(os.environ.get("RELAY_PORT", "53010"))
-EXPERT_PORT = int(os.environ.get("EXPERT_PORT", "53011"))
+RELAY_PORT = int(os.environ.get("RELAY_PORT", "0"))   # 0 = ephemeral (no port conflicts)
+EXPERT_PORT = int(os.environ.get("EXPERT_PORT", "0"))
 ASKER_HOST = os.environ.get("ASKER_HOST", "127.0.0.1")
-ASKER_PORT = int(os.environ.get("ASKER_PORT", "53012"))
 
 
 def main() -> int:
@@ -59,15 +58,31 @@ def main() -> int:
     api_key = bp.load_anthropic_key()
     model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
-    # cluster with chosen hosts + FIXED ports so the asker can find us
+    # Bind sockets FIRST on (default ephemeral) ports — eliminates the fixed-port
+    # "Address already in use" crash on re-runs / stale processes.
+    rsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    esock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    esock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        rsock.bind((RELAY_HOST, RELAY_PORT))
+        esock.bind((EXPERT_HOST, EXPERT_PORT))
+    except OSError as exc:
+        print(f"[serve] could not bind ({exc}). A berlin_serve may already be running — "
+              f"run:  pkill -f berlin_serve  and retry.")
+        return 2
+    relay_port = rsock.getsockname()[1]
+    expert_port = esock.getsockname()[1]
+
+    # cluster with the ACTUAL bound ports so the asker can find us
     params = OutfoxParams(payload_size=DEFAULT_PAYLOAD_SIZE, routing_size=DEFAULT_ROUTING_SIZE, max_hops=5)
     nodes = {}
-    for nid, host, port in ((bp.RELAY_ID, RELAY_HOST, RELAY_PORT), (bp.EXPERT_ID, EXPERT_HOST, EXPERT_PORT)):
+    for nid, host, port in ((bp.RELAY_ID, RELAY_HOST, relay_port), (bp.EXPERT_ID, EXPERT_HOST, expert_port)):
         pk, sk = params.kem.keygen()
         nodes[nid] = {"host": host, "port": port, "kem_pk": pk.hex(), "kem_sk": sk.hex(),
                       "role": "relay" if nid == bp.RELAY_ID else "expert"}
     raw = {"params": {"payload_size": DEFAULT_PAYLOAD_SIZE, "routing_size": DEFAULT_ROUTING_SIZE, "max_hops": 5},
-           "client": {"host": ASKER_HOST, "port": ASKER_PORT}, "nodes": nodes}
+           "client": {"host": ASKER_HOST, "port": 0}, "nodes": nodes}
     (SHARE / "cluster.json").write_text(json.dumps(raw), encoding="utf-8")
     cluster = ClusterConfig.load(SHARE / "cluster.json")
 
@@ -77,29 +92,24 @@ def main() -> int:
     # The manifest digest is non-deterministic per build, so serialize THIS one for
     # the asker (load, don't recompute) along with the handle that's bound to it.
     directory.snapshot().with_supernodes(
-        [{"node_id": bp.RELAY_ID, "endpoint": {"host": RELAY_HOST, "port": RELAY_PORT}}]
+        [{"node_id": bp.RELAY_ID, "endpoint": {"host": RELAY_HOST, "port": relay_port}}]
     ).save(SHARE / "directory.json")
 
     handle_record = OpaqueHandleIssuer(bp.HANDLE_SECRET).record(
         peer_id=bp.EXPERT_ID, manifest_digest=record.manifest.index_digest,
         mailbox_id="mailbox-berlin", now=1000.0)
-    par = PeerAddressRelay(relay_id=bp.RELAY_ID, relay_endpoint=UdpEndpoint(RELAY_HOST, RELAY_PORT),
+    par = PeerAddressRelay(relay_id=bp.RELAY_ID, relay_endpoint=UdpEndpoint(RELAY_HOST, relay_port),
                            secret=bp.REACH_SECRET)
     challenge = par.request_registration(peer_id=handle_record.handle,
-                                         observed_endpoint=UdpEndpoint(EXPERT_HOST, EXPERT_PORT), now=time.time())
+                                         observed_endpoint=UdpEndpoint(EXPERT_HOST, expert_port), now=time.time())
     peer_address = par.confirm_registration(challenge).to_public_dict()
     (SHARE / "askpack.json").write_text(json.dumps({
         "handle": handle_record.handle,
         "manifest_digest": record.manifest.index_digest,
         "kem_pk_hex": cluster.node(bp.EXPERT_ID).kem_pk_hex,
         "peer_address": peer_address,
-        "relay_host": RELAY_HOST, "relay_port": RELAY_PORT}), encoding="utf-8")
+        "relay_host": RELAY_HOST, "relay_port": relay_port}), encoding="utf-8")
 
-    # start relay (supernode) + expert
-    rsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    rsock.bind((RELAY_HOST, RELAY_PORT))
-    esock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    esock.bind((EXPERT_HOST, EXPERT_PORT))
     stop = threading.Event()
     quiet = LoggingConfig(level="silent")
     relay_rt = WireNodeRuntime(cluster, bp.RELAY_ID, control_bootstrap_path=str(bootstrap_path),
@@ -111,7 +121,7 @@ def main() -> int:
                                 reply_handler=bp.make_berlin_reply_handler(api_key, model))
     sup = SupernodeDaemon(relay_rt, relay_secret=bp.REACH_SECRET, advertise_host=RELAY_HOST)
     sup.attach_socket(rsock)
-    sup.forwarder.register_peer(handle_record.handle, (EXPERT_HOST, EXPERT_PORT))
+    sup.forwarder.register_peer(handle_record.handle, (EXPERT_HOST, expert_port))
 
     threads = [
         threading.Thread(target=relay_rt.serve_on_socket, args=(rsock,), kwargs={"stop": stop}, daemon=True),
@@ -120,8 +130,8 @@ def main() -> int:
     for t in threads:
         t.start()
 
-    print(f"[serve] relay  {RELAY_HOST}:{RELAY_PORT}")
-    print(f"[serve] expert {EXPERT_HOST}:{EXPERT_PORT}  (LLM={'claude:' + model if api_key else 'captured answer'})")
+    print(f"[serve] relay  {RELAY_HOST}:{relay_port}")
+    print(f"[serve] expert {EXPERT_HOST}:{expert_port}  (LLM={'claude:' + model if api_key else 'captured answer'})")
     print(f"[serve] askpack → {SHARE / 'askpack.json'}")
     print(f"[serve] READY. In another window/machine run:")
     print(f"        TENET_NET_DIR={SHARE} .venv/bin/python scripts/demo/berlin_ask.py")
