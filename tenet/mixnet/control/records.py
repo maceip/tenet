@@ -6,13 +6,22 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 import time
-from typing import Mapping, Sequence
+from typing import Literal, Mapping, Sequence
 
 from nacl.exceptions import BadSignatureError
 from nacl.signing import SigningKey, VerifyKey
 
 CONTROL_RECORD_SCHEMA = "tenet.mixnet.control.record.2026-06"
 SIGNED_CONTROL_RECORD_SCHEMA = "tenet.mixnet.control.signed_record.2026-06"
+
+# Authority classes a signing key can hold. Policy (see control/policy.py) maps
+# each record_type to the authority classes permitted to issue it, so a client
+# key can never mint a trust update and a non-TEE key can never mint a record
+# that claims TEE provenance.
+AuthorityClass = Literal["root", "tee", "client", "delegated", "non_tee_matcher"]
+AUTHORITY_CLASSES: frozenset[str] = frozenset(
+    {"root", "tee", "client", "delegated", "non_tee_matcher"}
+)
 
 RECORD_TYPE_NAME_DESCRIPTOR = "name_descriptor"
 RECORD_TYPE_CLIENT_ADVERTISEMENT = "client_advertisement"
@@ -28,6 +37,10 @@ RECORD_TYPE_MIXNET_ROUTING = "mixnet_routing_descriptor"
 RECORD_TYPE_REACHABILITY_ASSIST = "reachability_assist_descriptor"
 RECORD_TYPE_SOFTWARE_IDENTITY = "software_identity"
 RECORD_TYPE_ATTESTATION_RECEIPT = "attestation_receipt"
+RECORD_TYPE_REVOCATION = "revocation"
+RECORD_TYPE_MATCHER_CAPABILITY = "matcher_capability"
+RECORD_TYPE_HANDLE_ADDRESS = "handle_address"
+RECORD_TYPE_CONTROL_DHT_PEER = "control_dht_peer"
 
 # Maximum size for a serialized SignedControlRecord when stored/fetched via the
 # control DHT (Kademlia). This is a safety bound because the overlay uses UDP
@@ -56,6 +69,15 @@ class ControlRecord:
     issued_at: float
     expires_at: float
     value: dict[str, object]
+    # Identity/lineage fields. ``subject_id`` is the thing the record is *about*
+    # (e.g. the matcher/handle/node id); ``issuer_id`` is the principal claiming
+    # to issue it; ``supersedes`` and ``revokes`` reference other record keys.
+    # They participate in the signed canonical bytes, so they cannot be forged
+    # after signing.
+    subject_id: str = ""
+    issuer_id: str = ""
+    supersedes: str | None = None
+    revokes: str | None = None
     schema: str = CONTROL_RECORD_SCHEMA
 
     def validate(self) -> None:
@@ -69,6 +91,12 @@ class ControlRecord:
             raise ControlRecordError("seq must be non-negative")
         if self.expires_at <= self.issued_at:
             raise ControlRecordError("expires_at must be after issued_at")
+        if self.supersedes is not None and not str(self.supersedes):
+            raise ControlRecordError("supersedes, if set, must be a non-empty key")
+        if self.record_type == RECORD_TYPE_REVOCATION and not self.revokes:
+            raise ControlRecordError("revocation records must name the revoked key")
+        if self.revokes is not None and not str(self.revokes):
+            raise ControlRecordError("revokes, if set, must be a non-empty key")
         _reject_direct_dial_fields(self.value)
 
     def is_expired(self, now: float | None = None) -> bool:
@@ -90,6 +118,8 @@ class ControlRecord:
         value = raw.get("value")
         if not isinstance(value, dict):
             raise ControlRecordError("control record value must be an object")
+        supersedes = raw.get("supersedes")
+        revokes = raw.get("revokes")
         record = cls(
             network_id=str(raw.get("network_id", "")),
             key=str(raw.get("key", "")),
@@ -98,6 +128,10 @@ class ControlRecord:
             issued_at=float(raw.get("issued_at", 0.0)),
             expires_at=float(raw.get("expires_at", 0.0)),
             value=dict(value),
+            subject_id=str(raw.get("subject_id", "")),
+            issuer_id=str(raw.get("issuer_id", "")),
+            supersedes=str(supersedes) if supersedes else None,
+            revokes=str(revokes) if revokes else None,
             schema=str(raw.get("schema", CONTROL_RECORD_SCHEMA)),
         )
         record.validate()
@@ -137,6 +171,32 @@ class SignedControlRecord:
                 valid += 1
         if valid < threshold:
             raise ControlRecordError("control record signature threshold not met")
+
+    def valid_signer_ids(
+        self,
+        verify_keys: Mapping[str, str | bytes],
+        *,
+        now: float | None = None,
+    ) -> frozenset[str]:
+        """Return the set of key_ids whose signatures over this record verify.
+
+        This is the authority-bearing primitive: policy decides what a record may
+        assert based on *which* keys signed it, not merely that the signature
+        threshold was met. Expired records yield no valid signers (fail closed).
+        """
+
+        if self.record.is_expired(now):
+            return frozenset()
+        payload = self.record.canonical_bytes()
+        signers: set[str] = set()
+        for sig in self.signatures:
+            key_id = sig.get("key_id", "")
+            sig_hex = sig.get("signature", "")
+            if not key_id or key_id in signers or key_id not in verify_keys:
+                continue
+            if _verify_ed25519(verify_keys[key_id], payload, sig_hex):
+                signers.add(key_id)
+        return frozenset(signers)
 
     def to_dict(self) -> dict[str, object]:
         return {

@@ -6,11 +6,15 @@ from dataclasses import dataclass
 import time
 from typing import Mapping, Sequence
 
+from tenet.handles import is_opaque_handle
 from tenet.mixnet.control.advertisement import CapabilityDescriptor, ClientAdvertisement
 from tenet.mixnet.control.dht import ControlDhtPeer, ControlDhtPlan, replication_plan
 from tenet.mixnet.control.descriptors import (
     AttestationReceiptDescriptor,
+    ControlDhtPeerDescriptor,
     ExpertDescriptor,
+    HandleAddressRecord,
+    MatcherCapabilityDescriptor,
     MixnetRoutingDescriptor,
     ReachabilityAssistDescriptor,
     ReviewDescriptor,
@@ -21,20 +25,25 @@ from tenet.mixnet.control.descriptors import (
 from tenet.mixnet.control.match_result import MatchResultDescriptor
 from tenet.mixnet.control.mixnode import MixnodeDescriptor
 from tenet.mixnet.control.names import NAME_KIND_POOL, NAME_KIND_STABLE, TenetName, parse_tenet_name
+from tenet.mixnet.control.policy import TrustPolicy, validate_record_policy
 from tenet.mixnet.control.pools import PoolDescriptor
 from tenet.mixnet.control.records import (
     ControlRecord,
     ControlRecordError,
     RECORD_TYPE_ATTESTATION_RECEIPT,
     RECORD_TYPE_CLIENT_ADVERTISEMENT,
+    RECORD_TYPE_CONTROL_DHT_PEER,
     RECORD_TYPE_EXPERT_DESCRIPTOR,
+    RECORD_TYPE_HANDLE_ADDRESS,
     RECORD_TYPE_MATCH_RESULT,
+    RECORD_TYPE_MATCHER_CAPABILITY,
     RECORD_TYPE_MIXNET_ROUTING,
     RECORD_TYPE_MIXNODE_DESCRIPTOR,
     RECORD_TYPE_NAME_DESCRIPTOR,
     RECORD_TYPE_POOL_DESCRIPTOR,
     RECORD_TYPE_REACHABILITY_ASSIST,
     RECORD_TYPE_REVIEW_DESCRIPTOR,
+    RECORD_TYPE_REVOCATION,
     RECORD_TYPE_SOFTWARE_IDENTITY,
     RECORD_TYPE_TOPIC_DESCRIPTOR,
     RECORD_TYPE_TRUST_UPDATE,
@@ -106,11 +115,37 @@ class MixnetControlService:
         verify_keys: Mapping[str, str | bytes] | None = None,
         threshold: int = 1,
         store: PersistentControlStore | None = None,
+        trust_policy: TrustPolicy | None = None,
     ) -> None:
         self.network_id = network_id
-        self.verify_keys = dict(verify_keys or {})
-        self.threshold = threshold
+        # The trust policy is the single source of truth for both the verify keys
+        # and the authority class each key holds. When a caller passes only
+        # verify_keys (the common path), every key defaults to ``root`` authority
+        # so behaviour is unchanged; hardened deployments pass an explicit
+        # TrustPolicy that classifies keys and is enforced on every put_signed.
+        #
+        # ``self.verify_keys`` and ``self.trust_policy.verify_keys`` are the SAME
+        # live dict object: some callers mutate ``service.verify_keys`` directly
+        # after construction (e.g. registering a key), and the policy check must
+        # see those keys too. Sharing the dict keeps them from diverging.
+        base = trust_policy if trust_policy is not None else TrustPolicy()
+        live_keys: dict[str, str | bytes] = dict(base.verify_keys)
+        live_keys.update(verify_keys or {})
+        effective_threshold = base.threshold if trust_policy is not None else threshold
+        self.verify_keys = live_keys
+        self.trust_policy = TrustPolicy(
+            verify_keys=self.verify_keys,
+            key_authorities=dict(base.key_authorities),
+            record_policy=base.record_policy,
+            threshold=effective_threshold,
+            default_authority=base.default_authority,
+            allowed_trust_tiers=base.allowed_trust_tiers,
+            allow_non_tee_signed=base.allow_non_tee_signed,
+            max_staleness_seconds=base.max_staleness_seconds,
+        )
+        self.threshold = effective_threshold
         self.store = store
+        self._revoked: set[str] = set()
         self._records: dict[str, SignedControlRecord] = {}
         self._advertisements: dict[str, ClientAdvertisement] = {}
         self._pools: dict[str, PoolDescriptor] = {}
@@ -124,6 +159,9 @@ class MixnetControlService:
         self._attestation_receipts: dict[str, AttestationReceiptDescriptor] = {}
         self._mixnet_routings: dict[str, MixnetRoutingDescriptor] = {}
         self._reachability_assists: dict[str, ReachabilityAssistDescriptor] = {}
+        self._matcher_capabilities: dict[str, MatcherCapabilityDescriptor] = {}
+        self._handle_addresses: dict[str, HandleAddressRecord] = {}
+        self._control_dht_peers: dict[str, ControlDhtPeerDescriptor] = {}
         self._kademlia_overlay = None  # set by runtime or tests when real overlay is active
         if self.store is not None:
             for signed in self.store.load():
@@ -137,6 +175,12 @@ class MixnetControlService:
         old = self._records.get(record.key)
         if old is not None and record.seq <= old.record.seq:
             raise ControlRecordError("control record seq did not advance")
+
+        # Policy validation: signature/TTL/network/seq are necessary but not
+        # sufficient. The signer must also be *authorized* to assert this record
+        # type. This runs for every ingress path — wire sync, bootstrap, store
+        # load, and the DHT fetch path (which routes through put_signed).
+        validate_record_policy(signed, self.trust_policy, now=now)
 
         # Enforce DHT payload size bound when a real overlay is attached (or always
         # for consistency when the control plane may ever be replicated). This
@@ -200,6 +244,27 @@ class MixnetControlService:
             ra = ReachabilityAssistDescriptor.from_dict(record.value)
             ra.validate()
             self._reachability_assists[ra.assist_id] = ra
+        if record.record_type == RECORD_TYPE_MATCHER_CAPABILITY:
+            cap = MatcherCapabilityDescriptor.from_dict(record.value)
+            cap.validate()
+            self._matcher_capabilities[cap.matcher_id] = cap
+        if record.record_type == RECORD_TYPE_HANDLE_ADDRESS:
+            ha = HandleAddressRecord.from_dict(record.value)
+            ha.validate()
+            self._handle_addresses[ha.handle] = ha
+        if record.record_type == RECORD_TYPE_CONTROL_DHT_PEER:
+            cp = ControlDhtPeerDescriptor.from_dict(record.value)
+            cp.validate()
+            self._control_dht_peers[cp.peer_id] = cp
+        if record.record_type == RECORD_TYPE_REVOCATION:
+            # validate() already guaranteed ``revokes`` is set for this type, and
+            # policy already confirmed the signer is authorized to revoke.
+            # Revocation is terminal: once a key is revoked, get() never returns
+            # it again regardless of any later higher-seq record for that key.
+            target = record.revokes or str(record.value.get("revokes", ""))
+            if not target:
+                raise ControlRecordError("revocation record names no target key")
+            self._revoked.add(str(target))
         if self.store is not None:
             self.store.save_all(self._records.values())
         # Also publish into the real Kademlia overlay (if attached by a
@@ -213,23 +278,33 @@ class MixnetControlService:
                 pass
 
     def get(self, key: str, *, now: float | None = None) -> SignedControlRecord | None:
+        # Revocation is terminal and beats everything else, including a
+        # DHT-resurfaced copy of the revoked record.
+        if key in self._revoked:
+            return None
         signed = self._records.get(key)
         if signed is not None and not signed.record.is_expired(now):
             return signed
         # Miss in local cache: try the real Kademlia overlay (if present).
         # fetch() performs an *iterative* lookup using the library's routing
         # table and kademlia protocol. The candidate is fed through
-        # put_signed so that signature threshold, seq, network, expiry and
-        # direct-dial rules are enforced exactly as for wire/bootstrap records.
+        # put_signed so that signature threshold, seq, network, expiry, policy
+        # and direct-dial rules are enforced exactly as for wire/bootstrap
+        # records.
         if getattr(self, "_kademlia_overlay", None) is not None:
             candidate = self._kademlia_overlay.fetch(key)
             if candidate is not None:
                 try:
                     self.put_signed(candidate, now=now)
-                    return self._records.get(key)
                 except ControlRecordError:
-                    pass
+                    return None
+                if key in self._revoked:
+                    return None
+                return self._records.get(key)
         return None
+
+    def is_revoked(self, key: str) -> bool:
+        return key in self._revoked
 
     def have(self, key: str, *, now: float | None = None) -> dict[str, object] | None:
         signed = self.get(key, now=now)
@@ -334,6 +409,37 @@ class MixnetControlService:
 
     def reachability_assist(self, assist_id: str) -> ReachabilityAssistDescriptor | None:
         return self._reachability_assists.get(assist_id)
+
+    def matcher_capability(self, matcher_id: str) -> MatcherCapabilityDescriptor | None:
+        return self._matcher_capabilities.get(matcher_id)
+
+    def matcher_capabilities(
+        self, *, pool: str | None = None
+    ) -> tuple[MatcherCapabilityDescriptor, ...]:
+        out = []
+        for cap in self._matcher_capabilities.values():
+            if pool is not None and pool not in cap.pools:
+                continue
+            if self.get(cap.key) is None:
+                continue
+            out.append(cap)
+        return tuple(sorted(out, key=lambda c: c.matcher_id))
+
+    def handle_address(self, handle: str) -> HandleAddressRecord | None:
+        ha = self._handle_addresses.get(handle)
+        if ha is None:
+            return None
+        if self.get(ha.key) is None:
+            return None
+        return ha
+
+    def control_dht_peers(self) -> tuple[ControlDhtPeerDescriptor, ...]:
+        out = [
+            cp
+            for cp in self._control_dht_peers.values()
+            if self.get(cp.key) is not None
+        ]
+        return tuple(sorted(out, key=lambda c: c.peer_id))
 
     def match_results(
         self,
@@ -577,6 +683,83 @@ class MixnetControlService:
             expires_at=issued + ttl_seconds,
         )
 
+    def make_unsigned_matcher_capability(
+        self,
+        capability: MatcherCapabilityDescriptor,
+        *,
+        seq: int,
+        ttl_seconds: float = 3600.0,
+        now: float | None = None,
+    ) -> ControlRecord:
+        capability.validate()
+        issued = time.time() if now is None else now
+        return capability.to_record(
+            network_id=self.network_id,
+            seq=seq,
+            issued_at=issued,
+            expires_at=issued + ttl_seconds,
+        )
+
+    def make_unsigned_handle_address(
+        self,
+        record: HandleAddressRecord,
+        *,
+        seq: int,
+        ttl_seconds: float = 270.0,
+        now: float | None = None,
+    ) -> ControlRecord:
+        record.validate()
+        issued = time.time() if now is None else now
+        return record.to_record(
+            network_id=self.network_id,
+            seq=seq,
+            issued_at=issued,
+            expires_at=issued + ttl_seconds,
+        )
+
+    def make_unsigned_control_dht_peer(
+        self,
+        descriptor: ControlDhtPeerDescriptor,
+        *,
+        seq: int,
+        ttl_seconds: float = 3600.0,
+        now: float | None = None,
+    ) -> ControlRecord:
+        descriptor.validate()
+        issued = time.time() if now is None else now
+        return descriptor.to_record(
+            network_id=self.network_id,
+            seq=seq,
+            issued_at=issued,
+            expires_at=issued + ttl_seconds,
+        )
+
+    def make_unsigned_revocation(
+        self,
+        target_key: str,
+        *,
+        seq: int,
+        issuer_id: str = "",
+        reason: str = "",
+        ttl_seconds: float = 3600.0 * 24 * 365,
+        now: float | None = None,
+    ) -> ControlRecord:
+        if not target_key:
+            raise ControlRecordError("revocation requires a target key")
+        issued = time.time() if now is None else now
+        return ControlRecord(
+            network_id=self.network_id,
+            key=f"revocation/{target_key}",
+            record_type=RECORD_TYPE_REVOCATION,
+            seq=seq,
+            issued_at=issued,
+            expires_at=issued + ttl_seconds,
+            value={"reason": reason} if reason else {},
+            subject_id=target_key,
+            issuer_id=issuer_id,
+            revokes=target_key,
+        )
+
     def make_unsigned_name_descriptor(
         self,
         name: str | TenetName,
@@ -620,6 +803,8 @@ def binding_from_record(record: ControlRecord, name: TenetName) -> MixnetRouteBi
         handle = str(value.get("opaque_handle", ""))
         if not handle:
             raise RouteBindingError("stable name descriptor requires opaque_handle")
+        if not is_opaque_handle(handle):
+            raise RouteBindingError("stable name descriptor handle must be an opaque handle")
         raw_path = value.get("mix_path", value.get("relay_path", ())) or ()
         mix_path = tuple(str(item) for item in raw_path)
         binding = MixnetRouteBinding(

@@ -5,11 +5,15 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Mapping
 
+from tenet.handles import is_opaque_handle
 from tenet.mixnet.control.names import parse_tenet_name
 from tenet.mixnet.control.records import (
     ControlRecord,
     RECORD_TYPE_ATTESTATION_RECEIPT,
+    RECORD_TYPE_CONTROL_DHT_PEER,
     RECORD_TYPE_EXPERT_DESCRIPTOR,
+    RECORD_TYPE_HANDLE_ADDRESS,
+    RECORD_TYPE_MATCHER_CAPABILITY,
     RECORD_TYPE_MIXNET_ROUTING,
     RECORD_TYPE_REACHABILITY_ASSIST,
     RECORD_TYPE_REVIEW_DESCRIPTOR,
@@ -17,6 +21,12 @@ from tenet.mixnet.control.records import (
     RECORD_TYPE_TOPIC_DESCRIPTOR,
     RECORD_TYPE_TRUST_UPDATE,
 )
+from tenet.protocol_invariants import (
+    reject_expertise_pool,
+    reject_routeable_string,
+)
+
+MATCHER_TRUST_TIERS = frozenset({"tee", "authority_pinned", "non_tee_signed"})
 
 EXPERT_DESCRIPTOR_SCHEMA = "tenet.expert_descriptor.2026-06"
 TOPIC_DESCRIPTOR_SCHEMA = "tenet.topic_descriptor.2026-06"
@@ -472,6 +482,13 @@ class ReachabilityAssistDescriptor:
             raise ValueError(f"unsupported reachability assist schema: {self.schema}")
         if not self.assist_id or not self.provider_node_id or not self.policy:
             raise ValueError("reachability assist requires id, provider, policy")
+        # A reachability assist is a NAT/relay capability. It must never leak
+        # which expertise pool a handle serves, and its opaque refs must not
+        # become direct dial instructions.
+        for ref in self.opaque_refs:
+            reject_routeable_string(ref, field="reachability assist opaque_ref")
+            reject_expertise_pool(ref, field="reachability assist opaque_ref")
+        reject_expertise_pool(self.policy, field="reachability assist policy")
 
     def to_dict(self) -> dict[str, object]:
         self.validate()
@@ -486,4 +503,235 @@ class ReachabilityAssistDescriptor:
             issued_at=issued_at,
             expires_at=expires_at,
             value=self.to_dict(),
+        )
+
+
+# --- Anti-leak descriptors that bind discovery without exposing routes --- #
+
+MATCHER_CAPABILITY_SCHEMA = "tenet.matcher_capability.2026-06"
+HANDLE_ADDRESS_SCHEMA = "tenet.handle_address.2026-06"
+CONTROL_DHT_PEER_SCHEMA = "tenet.control_dht_peer.2026-06"
+
+
+@dataclass(frozen=True)
+class MatcherCapabilityDescriptor:
+    """What a matcher offers, with the trust evidence needed to use it.
+
+    This is the record a client resolves to choose a matcher. It must let the
+    client verify result signatures and trust tier *without* exposing a public
+    expertise->route mapping: the matcher is reached via an opaque handle or an
+    opaque endpoint ref, never a dialable address.
+    """
+
+    matcher_id: str
+    pools: tuple[str, ...]
+    trust_tier: str  # "tee" | "authority_pinned" | "non_tee_signed"
+    result_signing_key: str
+    query_endpoint_ref: str | None = None
+    matcher_handle: str | None = None
+    attestation_ref: str | None = None
+    code_identity: str | None = None
+    dataset_commitment: str | None = None
+    privacy_policy: str | None = None
+    expires_at: float | None = None
+    schema: str = MATCHER_CAPABILITY_SCHEMA
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "MatcherCapabilityDescriptor":
+        expires_at = raw.get("expires_at")
+        return cls(
+            matcher_id=str(raw.get("matcher_id", "")),
+            pools=tuple(str(x) for x in raw.get("pools", ()) or ()),
+            trust_tier=str(raw.get("trust_tier", "")),
+            result_signing_key=str(raw.get("result_signing_key", "")),
+            query_endpoint_ref=_optional_str(raw.get("query_endpoint_ref")),
+            matcher_handle=_optional_str(raw.get("matcher_handle")),
+            attestation_ref=_optional_str(raw.get("attestation_ref")),
+            code_identity=_optional_str(raw.get("code_identity")),
+            dataset_commitment=_optional_str(raw.get("dataset_commitment")),
+            privacy_policy=_optional_str(raw.get("privacy_policy")),
+            expires_at=float(expires_at) if expires_at is not None else None,
+            schema=str(raw.get("schema", MATCHER_CAPABILITY_SCHEMA)),
+        )
+
+    @property
+    def key(self) -> str:
+        return f"matcher/{self.matcher_id}/capability"
+
+    def validate(self) -> None:
+        if self.schema != MATCHER_CAPABILITY_SCHEMA:
+            raise ValueError(f"unsupported matcher capability schema: {self.schema}")
+        if not self.matcher_id:
+            raise ValueError("matcher capability requires matcher_id")
+        if not self.pools:
+            raise ValueError("matcher capability requires at least one pool")
+        for pool in self.pools:
+            parsed = parse_tenet_name(pool)
+            if parsed.normalized != pool or parsed.kind != "pool":
+                raise ValueError("matcher capability pools must be normalized pool names")
+        if self.trust_tier not in MATCHER_TRUST_TIERS:
+            raise ValueError(f"unsupported matcher trust tier: {self.trust_tier!r}")
+        if not self.result_signing_key:
+            raise ValueError("matcher capability requires result_signing_key")
+        # Exactly one reachability reference, and it must be opaque.
+        if bool(self.query_endpoint_ref) == bool(self.matcher_handle):
+            raise ValueError(
+                "matcher capability requires exactly one of query_endpoint_ref or matcher_handle"
+            )
+        if self.matcher_handle is not None and not is_opaque_handle(self.matcher_handle):
+            raise ValueError("matcher_handle must be an opaque handle")
+        if self.query_endpoint_ref is not None:
+            reject_routeable_string(self.query_endpoint_ref, field="matcher query_endpoint_ref")
+        # Trust-tier evidence requirements (defense in depth; the matcher resolver
+        # enforces the same rules at selection time).
+        if self.trust_tier == "tee" and not self.attestation_ref:
+            raise ValueError("tee matcher capability requires attestation_ref")
+        if self.trust_tier == "non_tee_signed":
+            if not self.code_identity:
+                raise ValueError("non_tee_signed matcher capability requires code_identity")
+            if not self.dataset_commitment:
+                raise ValueError("non_tee_signed matcher capability requires dataset_commitment")
+
+    def to_dict(self) -> dict[str, object]:
+        self.validate()
+        return asdict(self)
+
+    def to_record(self, *, network_id: str, seq: int, issued_at: float, expires_at: float) -> ControlRecord:
+        return ControlRecord(
+            network_id=network_id,
+            key=self.key,
+            record_type=RECORD_TYPE_MATCHER_CAPABILITY,
+            seq=seq,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            value=self.to_dict(),
+            subject_id=self.matcher_id,
+        )
+
+
+@dataclass(frozen=True)
+class HandleAddressRecord:
+    """Binds an opaque handle to a set of opaque route/assist references.
+
+    The whole point of the handle layer is that the asker never learns a dialable
+    address for the answerer. This record carries only opaque references (assist
+    ids, mix-path node ids); resolving them to a live path is the reachability
+    resolver's job and still goes through mailbox/peer-address resolution.
+    """
+
+    handle: str
+    route_candidates: tuple[str, ...] = ()
+    assist_refs: tuple[str, ...] = ()
+    direct_allowed: bool = False
+    issued_at: float = 0.0
+    expires_at: float = 0.0
+    signer: str = ""
+    schema: str = HANDLE_ADDRESS_SCHEMA
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "HandleAddressRecord":
+        return cls(
+            handle=str(raw.get("handle", "")),
+            route_candidates=tuple(str(x) for x in raw.get("route_candidates", ()) or ()),
+            assist_refs=tuple(str(x) for x in raw.get("assist_refs", ()) or ()),
+            direct_allowed=bool(raw.get("direct_allowed", False)),
+            issued_at=float(raw.get("issued_at", 0.0)),
+            expires_at=float(raw.get("expires_at", 0.0)),
+            signer=str(raw.get("signer", "")),
+            schema=str(raw.get("schema", HANDLE_ADDRESS_SCHEMA)),
+        )
+
+    @property
+    def key(self) -> str:
+        return f"handle/{self.handle}/address"
+
+    def validate(self) -> None:
+        if self.schema != HANDLE_ADDRESS_SCHEMA:
+            raise ValueError(f"unsupported handle address schema: {self.schema}")
+        if not is_opaque_handle(self.handle):
+            raise ValueError("handle address record requires an opaque handle")
+        if not self.signer:
+            raise ValueError("handle address record requires a signer")
+        if self.expires_at <= self.issued_at:
+            raise ValueError("handle address expires_at must be after issued_at")
+        for ref in self.route_candidates:
+            if not ref:
+                raise ValueError("handle address route_candidate must be non-empty")
+            reject_routeable_string(ref, field="handle address route_candidate")
+            reject_expertise_pool(ref, field="handle address route_candidate")
+        for ref in self.assist_refs:
+            reject_routeable_string(ref, field="handle address assist_ref")
+            reject_expertise_pool(ref, field="handle address assist_ref")
+
+    def to_dict(self) -> dict[str, object]:
+        self.validate()
+        return asdict(self)
+
+    def to_record(self, *, network_id: str, seq: int, issued_at: float, expires_at: float) -> ControlRecord:
+        return ControlRecord(
+            network_id=network_id,
+            key=self.key,
+            record_type=RECORD_TYPE_HANDLE_ADDRESS,
+            seq=seq,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            value=self.to_dict(),
+            subject_id=self.handle,
+        )
+
+
+@dataclass(frozen=True)
+class ControlDhtPeerDescriptor:
+    """Names a control-DHT peer for sync/discovery — without a dialable address.
+
+    Item 4 syncs from DHT-discovered control peers; this is the record it
+    discovers. It carries the peer identity and capabilities so reachability can
+    be resolved separately (peer-address/mixnet), never a raw endpoint.
+    """
+
+    peer_id: str
+    node_key: str
+    capabilities: tuple[str, ...] = ()
+    region_hint: str | None = None
+    claim_refs: tuple[str, ...] = ()
+    schema: str = CONTROL_DHT_PEER_SCHEMA
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "ControlDhtPeerDescriptor":
+        return cls(
+            peer_id=str(raw.get("peer_id", "")),
+            node_key=str(raw.get("node_key", "")),
+            capabilities=tuple(str(x) for x in raw.get("capabilities", ()) or ()),
+            region_hint=_optional_str(raw.get("region_hint")),
+            claim_refs=tuple(str(x) for x in raw.get("claim_refs", ()) or ()),
+            schema=str(raw.get("schema", CONTROL_DHT_PEER_SCHEMA)),
+        )
+
+    @property
+    def key(self) -> str:
+        return f"control_dht/peer/{self.peer_id}"
+
+    def validate(self) -> None:
+        if self.schema != CONTROL_DHT_PEER_SCHEMA:
+            raise ValueError(f"unsupported control dht peer schema: {self.schema}")
+        if not self.peer_id or not self.node_key:
+            raise ValueError("control dht peer requires peer_id and node_key")
+        reject_routeable_string(self.peer_id, field="control dht peer_id")
+        if self.region_hint is not None:
+            reject_routeable_string(self.region_hint, field="control dht region_hint")
+
+    def to_dict(self) -> dict[str, object]:
+        self.validate()
+        return asdict(self)
+
+    def to_record(self, *, network_id: str, seq: int, issued_at: float, expires_at: float) -> ControlRecord:
+        return ControlRecord(
+            network_id=network_id,
+            key=self.key,
+            record_type=RECORD_TYPE_CONTROL_DHT_PEER,
+            seq=seq,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            value=self.to_dict(),
+            subject_id=self.peer_id,
         )

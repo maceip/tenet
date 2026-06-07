@@ -7,6 +7,7 @@ from typing import Mapping
 
 from tenet.mixnet.control.names import TenetName, parse_tenet_name
 from tenet.mixnet.control.records import ControlRecord, RECORD_TYPE_POOL_DESCRIPTOR
+from tenet.protocol_invariants import reject_routeable_string
 
 POOL_DESCRIPTOR_SCHEMA = "tenet.pool_descriptor.2026-06"
 
@@ -73,6 +74,13 @@ class PoolDescriptor:
             raise ValueError("pool descriptor requires topic tags")
         if self.min_pool_size < 1:
             raise ValueError("min_pool_size must be positive")
+        # A pool descriptor names a pool and its membership *by reference*. It must
+        # never embed a routeable peer id/endpoint — that would collapse the
+        # discovery layer onto the routing layer.
+        for ref in self.member_capability_refs:
+            reject_routeable_string(ref, field="pool member_capability_ref")
+        for tag in self.topic_tags:
+            reject_routeable_string(tag, field="pool topic_tag")
 
     def to_dict(self) -> dict[str, object]:
         self.validate()
