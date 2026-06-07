@@ -66,6 +66,30 @@ HANDLE_SECRET = b"berlin-demo-handle-secret-0001"
 RELAY_ID = "relay1"
 EXPERT_ID = "expert_berlin"
 
+# Silence asyncio/futures teardown chatter so the control-DHT overlay shutdown
+# never spills "Event loop is closed" / "Task was destroyed" onto the demo screen.
+import logging as _logging  # noqa: E402
+_logging.getLogger("asyncio").setLevel(_logging.CRITICAL)
+_logging.getLogger("concurrent.futures").setLevel(_logging.CRITICAL)
+
+
+def load_anthropic_key():
+    """Bulletproof key: if ANTHROPIC_API_KEY isn't exported, load it from
+    ~/fry-core/.env so the real expert always answers (never transport-only)."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if key:
+        return key
+    envf = Path.home() / "fry-core" / ".env"
+    if envf.exists():
+        for ln in envf.read_text().splitlines():
+            ln = ln.strip()
+            if ln.startswith("ANTHROPIC_API_KEY="):
+                val = ln.split("=", 1)[1].strip().strip('"').strip("'")
+                if val:
+                    os.environ["ANTHROPIC_API_KEY"] = val
+                    return val
+    return None
+
 # The expert's opinionated local knowledge — this is what makes the answer worth
 # paying for: a real point of view a generic search result won't give you.
 BERLIN_CONTEXT = """\
@@ -220,7 +244,7 @@ def main() -> int:
     os.environ.setdefault("POR_STREAM_CHUNK_REPEATS", "1")
     os.environ.setdefault("POR_STREAM_DONE_REPEATS", "1")
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip() or None
+    api_key = load_anthropic_key()
     tmp = Path(os.environ.get("TENET_BERLIN_DIR", "/tmp/tenet-berlin-demo"))
     tmp.mkdir(parents=True, exist_ok=True)
     # Each run mints a fresh root key, so stale persisted control stores (signed
@@ -303,4 +327,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _rc = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_rc or 0)  # hard-exit: skip daemon-thread GC chatter on shutdown

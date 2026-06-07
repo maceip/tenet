@@ -168,8 +168,12 @@ def main() -> int:
     class _Filter:
         def __init__(self, real):
             self.real = real
+        _DROP = ("Did not receive reply", "within 5 seconds", "Event loop is closed",
+                 "Task was destroyed", "exception calling callback", "Traceback (most recent",
+                 "concurrent/futures", "asyncio/", "_check_closed", "call_soon_threadsafe",
+                 "_invoke_callbacks", "_call_check_cancel", "RuntimeError: Event loop")
         def write(self, s):
-            if "Did not receive reply" in s or "within 5 seconds" in s:
+            if any(d in s for d in self._DROP):
                 return len(s)
             return self.real.write(s)
         def flush(self):
@@ -181,7 +185,7 @@ def main() -> int:
     os.environ.setdefault("POR_CLIENT_REQUEST_REPEATS", "1")
     os.environ.setdefault("POR_STREAM_CHUNK_REPEATS", "1")
     os.environ.setdefault("POR_STREAM_DONE_REPEATS", "1")
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip() or None
+    api_key = bp.load_anthropic_key()
     tmp = Path("/tmp/tenet-present")
     tmp.mkdir(parents=True, exist_ok=True)
     for stale in ("relay-control-store.json", "expert-control-store.json"):
@@ -280,4 +284,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _rc = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_rc or 0)  # hard-exit: skip daemon-thread GC chatter on shutdown
