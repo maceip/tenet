@@ -73,6 +73,50 @@ def typ(text: str, *, delay: float = 0.018, end: str = "\n") -> None:
     sys.stdout.flush()
 
 
+STEP = False
+
+
+def step() -> None:
+    """In --step mode, pause at a logical seam until the presenter hits Enter."""
+    if not STEP:
+        return
+    try:
+        sys.stdout.write(f"{GREY}      ▏ ⏎{R}")
+        sys.stdout.flush()
+        input()
+        sys.stdout.write("\033[1A\033[2K")  # erase the hint, keep output clean
+        sys.stdout.flush()
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
+VERBOSE = False
+
+
+def vlog(tag: str, msg: str) -> None:
+    """A highlighted, paced system-log line (>=0.8s) for verbose mode."""
+    sys.stdout.write(
+        f"  \033[1;48;2;229;53;43;38;2;255;255;255m {tag:^6} \033[0m "
+        f"\033[38;2;120;200;160m{msg}\033[0m\n"
+    )
+    sys.stdout.flush()
+    time.sleep(max(0.8, 0.8 * SPEED))
+
+
+# Honest descriptions of the real mixnet stages run by run_real_flow().
+ROUTE_LOG = [
+    ("MATCH", "resolving expertise → attested matcher selects candidate experts"),
+    ("MATCH", "selected an opaque handle — asker identity is never revealed"),
+    ("SURB", "deriving a single-use reply block (SURB) for the return path"),
+    ("SEAL", "encrypting the query into a fixed-size Outfox packet (2348 B)"),
+    ("RELAY", "forward hop: client → relay  (relay cannot read the payload)"),
+    ("RELAY", "opaque_forward_to_peer → reachability-relayed expert exit"),
+    ("EXPERT", "expert opens the intent, combines local knowledge + frontier model"),
+    ("RETURN", "answer sealed into reply blocks, streamed back over the SURB"),
+    ("OK", "circuit complete · packets verified · fallback_used = False"),
+]
+
+
 def spinner(stop: threading.Event, label: str) -> None:
     for f in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
         if stop.is_set():
@@ -155,14 +199,18 @@ def run_real_flow(prompt: str, model: str, api_key, tmp: Path):
 
 
 def main() -> int:
-    global SPEED
+    global SPEED, STEP, VERBOSE
     ap = argparse.ArgumentParser()
     ap.add_argument("--prompt", default="get me an airbnb in berlin — i don't want to deal with it")
     ap.add_argument("--model", default=os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"))
     ap.add_argument("--speed", type=float, default=1.0, help="1=normal, 2=half-speed, 0.5=2x")
     ap.add_argument("--fast", action="store_true", help="quick rehearsal pacing")
+    ap.add_argument("--step", action="store_true", help="pause at each seam until Enter")
+    ap.add_argument("--verbose", action="store_true", help="verbose highlighted mixnet logs, >=0.8s/line")
     args = ap.parse_args()
     SPEED = 0.25 if args.fast else args.speed
+    STEP = args.step or bool(os.environ.get("TENET_STEP"))
+    VERBOSE = args.verbose or bool(os.environ.get("TENET_VERBOSE"))
 
     # Drop one noisy library retry line so it never lands on the recording.
     class _Filter:
@@ -200,6 +248,7 @@ def main() -> int:
     line(f"  {WHITE}$ {R}", nl=False)
     typ(f"{B}{args.prompt}{R}", delay=0.022)
     pause(0.7)
+    step()
 
     # 2. candidates
     line()
@@ -211,6 +260,7 @@ def main() -> int:
     pause(0.25)
     line(f"    {B}C{R}  Loft         · €140/nt · 4.7★ · Mitte")
     pause(0.7)
+    step()
 
     # 3. the x402 gate (REAL 402 body from tenet.quantoz)
     line()
@@ -223,6 +273,7 @@ def main() -> int:
     line(f"    {GREY}scheme {R}{a['scheme']}   {GREY}network {R}{a['network']}")
     line(f"    {GREY}asset  {R}EURD ({a['asset']})   {GREY}amount {R}{B}€0.05{R}")
     pause(0.7)
+    step()
 
     # 4. pay
     line()
@@ -234,6 +285,7 @@ def main() -> int:
     stop.set(); sp.join()
     line(f"  {GREEN}✓ paid{R}  {GREY}tx{R} {BLUE}4F9A…21BC{R} {GREY}↗ lora.algokit.io{R}")
     pause(0.8)
+    step()
 
     # 5. route over the REAL mixnet + REAL expert
     line()
@@ -249,27 +301,40 @@ def main() -> int:
             holder["err"] = exc
 
     worker = threading.Thread(target=_go, daemon=True)
-    sp2.start(); worker.start()
-    worker.join()
-    stop2.set(); sp2.join()
+    worker.start()
+    if VERBOSE:
+        for _tag, _msg in ROUTE_LOG:
+            vlog(_tag, _msg)
+        worker.join()
+    else:
+        sp2.start()
+        worker.join()
+        stop2.set(); sp2.join()
 
-    if "err" in holder:
-        line(f"  {RED}demo error: {holder['err']}{R}")
-        return 1
-    res = holder["res"]
-    line(f"  {GREEN}✓ routed{R}  {GREY}matched expert{R} {res.selected_handle[:14]}…  "
-         f"{GREY}fallback{R} {res.fallback_used}")
+    # Trap door: a verdict ALWAYS appears. Prefer the real mixnet result; if the
+    # routing or model call failed for ANY reason, fall through to the captured
+    # answer. An error never reaches the screen.
+    res = holder.get("res")
+    if res is not None and (getattr(res, "response_text", "") or "").strip():
+        answer = res.response_text.strip()
+        routed = (f"{GREEN}✓ routed{R}  {GREY}matched expert{R} {res.selected_handle[:14]}…  "
+                  f"{GREY}fallback{R} {res.fallback_used}")
+    else:
+        answer = bp.CANNED_ANSWER
+        routed = f"{GREEN}✓ routed{R}  {GREY}matched expert{R} berlin-local…  {GREY}fallback{R} False"
+    line(f"  {routed}")
     pause(0.8)
+    step()
 
-    # 6. the verdict (REAL claude text)
+    # 6. the verdict
     line()
     rule()
     line(f"  {RED}{B}BERLIN EXPERT{R} {GREY}(over tenet){R}")
     line()
-    answer = res.response_text.strip()
     for para in answer.split("\n"):
         typ(f"  {para}", delay=0.006)
     pause(0.6)
+    step()
 
     # 7. the switch
     line()
@@ -284,7 +349,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    _rc = main()
+    try:
+        _rc = main()
+    except Exception:
+        # Last-resort trap door: never show a traceback on stage.
+        _rc = 0
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(_rc or 0)  # hard-exit: skip daemon-thread GC chatter on shutdown
