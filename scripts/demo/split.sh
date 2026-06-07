@@ -53,7 +53,11 @@ tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS"
 tmux set-option -t "$SESSION" status off
 tmux set-option -t "$SESSION" remain-on-exit on
 tmux set-option -t "$SESSION" pane-border-status top
-tmux set-option -t "$SESSION" pane-border-format " #{pane_title} "
+# ASKER (pane 0) = bright cyan, EXPERT (pane 1) = bright red — bold, filled bg.
+tmux set-option -t "$SESSION" pane-border-format \
+  "#{?#{==:#{pane_index},0},#[bg=colour51 fg=colour16 bold],#[bg=colour196 fg=colour231 bold]}  #{pane_title}  #[default]"
+tmux set-option -t "$SESSION" pane-border-style "fg=colour238"
+tmux set-option -t "$SESSION" pane-active-border-style "fg=colour244"
 
 # LEFT pane (0) = ASKER. After the demo finishes (or Ctrl-C), one keypress kills
 # the whole session (both panes) — no orphaned tail -f.
