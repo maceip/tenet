@@ -28,6 +28,7 @@ ROWS="$(tput lines 2>/dev/null || echo 50)"
 
 tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS"
 tmux set-option -t "$SESSION" status off
+tmux set-option -t "$SESSION" remain-on-exit on
 tmux set-option -t "$SESSION" pane-border-status top
 tmux set-option -t "$SESSION" pane-border-format " #{pane_title} "
 
@@ -35,7 +36,7 @@ tmux set-option -t "$SESSION" pane-border-format " #{pane_title} "
 # the whole session (both panes) — no orphaned tail -f.
 tmux select-pane -t "$SESSION":0.0 -T "ASKER  ·  your agent"
 tmux send-keys -t "$SESSION":0.0 \
-  "clear; TENET_VERBOSE=1 TENET_REAL_PAY='${TENET_REAL_PAY:-}' TENET_PAY_TO='${TENET_PAY_TO:-}' TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2mpress any key to exit\033[0m'; read -rsn1; tmux kill-session -t '$SESSION'" C-m
+  "clear; TENET_VERBOSE=1 TENET_REAL_PAY='${TENET_REAL_PAY:-}' TENET_PAY_TO='${TENET_PAY_TO:-}' TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2m── demo complete · Ctrl-b then & to exit ──\033[0m\n'" C-m
 
 # RIGHT pane (1) = EXPERT
 tmux split-window -h -t "$SESSION":0

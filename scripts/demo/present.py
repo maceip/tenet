@@ -116,6 +116,16 @@ ROUTE_LOG = [
     ("OK", "circuit complete · packets verified · fallback_used = False"),
 ]
 
+# Honest descriptions of the real x402 payment steps run by real_payment().
+PAY_LOG = [
+    ("x402", "402 Payment Required → €0.05 (testnet: USDC) on Algorand"),
+    ("PAY", "building the USDC asset-transfer transaction"),
+    ("PAY", "signing with the agent's key — no human approval"),
+    ("CHAIN", "broadcasting to Algorand testnet…"),
+    ("CHAIN", "waiting for on-chain confirmation"),
+    ("OK", "payment settled · token unlock authorized"),
+]
+
 
 def real_payment():
     """REAL Algorand testnet payment when TENET_REAL_PAY is set and a funded payer
@@ -303,16 +313,26 @@ def main() -> int:
     pause(0.7)
     step()
 
-    # 4. pay — REAL on-chain tx if TENET_REAL_PAY + funded payer; else staged line
+    # 4. pay — REAL on-chain tx if TENET_REAL_PAY + funded payer; else staged line.
+    # Verbose: show the payment steps (paced, highlighted) while the real tx settles.
     line()
     line(f"  {GREY}paying the expert pool…{R}")
-    stop = threading.Event()
-    sp = threading.Thread(target=spinner, args=(stop, "settling on algorand testnet"), daemon=True)
-    sp.start()
-    pay = real_payment()        # (txid, label) or None — instant None when staged
-    if pay is None:
-        pause(1.6)
-    stop.set(); sp.join()
+    _ph = {}
+    _pw = threading.Thread(target=lambda: _ph.update(pay=real_payment()), daemon=True)
+    _pw.start()
+    if VERBOSE:
+        for _tag, _msg in PAY_LOG:
+            vlog(_tag, _msg)
+        _pw.join()
+    else:
+        stop = threading.Event()
+        sp = threading.Thread(target=spinner, args=(stop, "settling on algorand testnet"), daemon=True)
+        sp.start()
+        _pw.join()
+        if _ph.get("pay") is None:
+            pause(1.6)
+        stop.set(); sp.join()
+    pay = _ph.get("pay")
     if pay:
         txid, label = pay
         short = f"{txid[:6]}…{txid[-4:]}"
