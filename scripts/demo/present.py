@@ -133,10 +133,14 @@ def real_payment():
         if not mn or not pay_to:
             return None
         from algosdk import account, mnemonic
-        from tenet.algorand import algod_client, pay_algo
+        from tenet.algorand import algod_client, pay_algo, pay_asset, TESTNET_USDC_ASA
         sk = mnemonic.to_private_key(mn)
         addr = account.address_from_private_key(sk)
-        return pay_algo(algod_client(), sk, addr, pay_to, 100_000, note=b"tenet-x402-berlin")
+        algod = algod_client()
+        asset = os.environ.get("TENET_PAY_ASSET", str(TESTNET_USDC_ASA)).strip().lower()
+        if asset in ("algo", "0", ""):
+            return pay_algo(algod, sk, addr, pay_to, 100_000, note=b"tenet-x402-berlin"), "0.1 ALGO"
+        return pay_asset(algod, sk, addr, pay_to, int(asset), 50_000, note=b"tenet-x402-berlin"), "0.05 USDC"
     except Exception:
         return None
 
@@ -305,13 +309,14 @@ def main() -> int:
     stop = threading.Event()
     sp = threading.Thread(target=spinner, args=(stop, "settling on algorand testnet"), daemon=True)
     sp.start()
-    txid = real_payment()       # blocks ~4s for a real tx; instant None when staged
-    if txid is None:
+    pay = real_payment()        # (txid, label) or None — instant None when staged
+    if pay is None:
         pause(1.6)
     stop.set(); sp.join()
-    if txid:
+    if pay:
+        txid, label = pay
         short = f"{txid[:6]}…{txid[-4:]}"
-        line(f"  {GREEN}✓ paid{R}  {GREY}tx{R} {BLUE}{short}{R}  {GREEN}● real on-chain{R}")
+        line(f"  {GREEN}✓ paid {label}{R}  {GREY}tx{R} {BLUE}{short}{R}  {GREEN}● real on-chain{R}")
         line(f"  {GREY}   https://lora.algokit.io/testnet/tx/{txid}{R}")
     else:
         line(f"  {GREEN}✓ paid{R}  {GREY}tx{R} {BLUE}4F9A…21BC{R} {GREY}↗ lora.algokit.io{R}")
