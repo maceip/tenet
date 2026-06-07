@@ -16,11 +16,38 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PY="$ROOT/.venv/bin/python"
-[ -x "$PY" ] || PY="python3"
 DIR="${TENET_NET_DIR:-/tmp/tenet-net}"
 CMD="${1:-split}"
 [ "$#" -gt 0 ] && shift || true
+
+# Resolve a Python that can ACTUALLY import the demo (not merely one that exists),
+# and self-heal a venv if none can — so this never crashes on a missing dep or the
+# wrong interpreter. The demo needs Python <=3.13 (some deps have no 3.14 wheels).
+DEPS='import tenet.mixnet.node_runtime, tenet.experts.client, tenet.experts.matcher, nacl, kademlia'
+_works() { [ -x "$1" ] && "$1" -c "$DEPS" >/dev/null 2>&1; }
+resolve_python() {
+  for c in "$ROOT/.venv/bin/python" "$ROOT/build/demo-venv/bin/python"; do
+    _works "$c" && { echo "$c"; return 0; }
+  done
+  if command -v python3 >/dev/null 2>&1 && python3 -c "$DEPS" >/dev/null 2>&1; then
+    echo python3; return 0
+  fi
+  echo "[net] one-time setup: building a venv with the demo deps (Python 3.13)…" >&2
+  if command -v uv >/dev/null 2>&1; then
+    { uv venv --python 3.13 "$ROOT/.venv" || uv venv "$ROOT/.venv"; } >/dev/null 2>&1 || true
+    uv pip install --python "$ROOT/.venv/bin/python" -q -e "$ROOT" \
+      kademlia dilithium-py "aioquic>=1.3.0" pynacl cryptography pqcrypto rpcudp >/dev/null 2>&1 || true
+  else
+    { python3 -m venv "$ROOT/.venv" && "$ROOT/.venv/bin/pip" install -q -U pip \
+      && "$ROOT/.venv/bin/pip" install -q -e "$ROOT" kademlia dilithium-py "aioquic>=1.3.0" \
+         pynacl cryptography pqcrypto rpcudp; } >/dev/null 2>&1 || true
+  fi
+  _works "$ROOT/.venv/bin/python" && { echo "$ROOT/.venv/bin/python"; return 0; }
+  echo "[net] could not set up the venv automatically. Run once, then retry:" >&2
+  echo "      cd $ROOT && uv venv --python 3.13 .venv && uv pip install -e . kademlia dilithium-py 'aioquic>=1.3.0'" >&2
+  return 1
+}
+PY="$(resolve_python)" || exit 1
 
 case "$CMD" in
   serve)
