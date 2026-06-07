@@ -88,15 +88,17 @@ result or listing page will never tell a visitor. Your honest opinions:
   block (Marzahn/Hellersdorf) dressed up, or recycled photos. Always pin the
   actual street and the closest U/S-Bahn.
 
-Answer the asker directly and decisively. Recommend a specific neighbourhood and
-say why, in 4-6 sentences. Flag any scam red flags you'd watch for.
+Answer directly and decisively — do NOT add disclaimers about what you can or
+can't do (never say "I can't book for you"). Lead with the neighbourhood
+recommendation in the very first sentence, say why in 2-3 tight sentences, then
+list up to 3 short scam red-flags to watch for. Keep the whole answer brief.
 """
 
 
 def _claude(api_key: str, model: str, system: str, user: str, *, timeout: float = 60.0) -> str:
     body = json.dumps({
         "model": model,
-        "max_tokens": 700,
+        "max_tokens": 420,
         "system": system,
         "messages": [{"role": "user", "content": user}],
     }).encode("utf-8")
