@@ -127,25 +127,58 @@ PAY_LOG = [
 ]
 
 
+def _load_dotenv_value(path: Path, *keys: str) -> str:
+    if not path.is_file():
+        return ""
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith("#") or "=" not in ln:
+            continue
+        k, v = ln.split("=", 1)
+        if k.strip() in keys:
+            val = v.strip().strip('"').strip("'")
+            if val:
+                return val
+    return ""
+
+
+def _payer_mnemonic() -> str:
+    for key in ("TENET_ALGO_MNEMONIC", "TENET_DEMO_CUSTODIAL_MNEMONIC", "ALGO_MNEMONIC"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val
+    payer = Path("/tmp/tenet_payer.mn")
+    if payer.is_file():
+        return payer.read_text(encoding="utf-8").strip()
+    root = Path(__file__).resolve().parents[2]
+    for envf in (Path.home() / "fry-core" / ".env", root / "config" / "beta-secrets.env"):
+        val = _load_dotenv_value(envf, "TENET_ALGO_MNEMONIC", "TENET_DEMO_CUSTODIAL_MNEMONIC", "ALGO_MNEMONIC")
+        if val:
+            return val
+    return ""
+
+
+# Watched expert-pool wallet — the default real-payment receiver (holds USDC).
+WATCHED_PAY_TO = "NVL6APNXFZKSTL2I4LTNEQCS4XVL7AIJLADOMQFA6IAWSWH6S46QWCBPRU"
+
+
 def real_payment():
-    """REAL Algorand testnet payment when TENET_REAL_PAY is set and a funded payer
-    key (TENET_ALGO_MNEMONIC or /tmp/tenet_payer.mn) + TENET_PAY_TO exist.
-    Returns the txid, or None to fall back to the staged line. NEVER raises —
-    any failure (no wifi, no key, etc.) silently falls back, so the demo can't break."""
-    if not os.environ.get("TENET_REAL_PAY"):
+    """REAL Algorand testnet payment by default (no TENET_REAL_PAY needed).
+    Discovers payer mnemonic from env, /tmp/tenet_payer.mn, or fry-core/.env.
+    Returns (txid, label) or None. NEVER raises."""
+    if os.environ.get("TENET_SIM_ONLY"):
         return None
     try:
-        mn = (os.environ.get("TENET_ALGO_MNEMONIC") or "").strip()
+        mn = _payer_mnemonic()
         if not mn:
-            p = Path("/tmp/tenet_payer.mn")
-            mn = p.read_text(encoding="utf-8").strip() if p.exists() else ""
-        pay_to = os.environ.get("TENET_PAY_TO", "").strip()
-        if not mn or not pay_to:
             return None
         from algosdk import account, mnemonic
         from tenet.algorand import algod_client, pay_algo, pay_asset, TESTNET_USDC_ASA
         sk = mnemonic.to_private_key(mn)
         addr = account.address_from_private_key(sk)
+        # Default receiver = the watched expert-pool wallet, so the real tx is
+        # visible in a wallet (matches "paying the expert pool"). No env needed.
+        pay_to = (os.environ.get("TENET_PAY_TO") or "").strip() or WATCHED_PAY_TO
         algod = algod_client()
         asset = os.environ.get("TENET_PAY_ASSET", str(TESTNET_USDC_ASA)).strip().lower()
         if asset in ("algo", "0", ""):
@@ -153,6 +186,13 @@ def real_payment():
         return pay_asset(algod, sk, addr, pay_to, int(asset), 50_000, note=b"tenet-x402-berlin"), "0.05 USDC"
     except Exception:
         return None
+
+
+def restart_sim_only() -> None:
+    """Clear the ASKER pane and re-run this script in staged-payment mode."""
+    os.system("clear")
+    os.environ["TENET_SIM_ONLY"] = "1"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def spinner(stop: threading.Event, label: str) -> None:
@@ -245,7 +285,9 @@ def main() -> int:
     ap.add_argument("--fast", action="store_true", help="quick rehearsal pacing")
     ap.add_argument("--step", action="store_true", help="pause at each seam until Enter")
     ap.add_argument("--verbose", action="store_true", help="verbose highlighted mixnet logs, >=0.8s/line")
+    ap.add_argument("--sim-only", action="store_true", help="staged payment line only (no on-chain xfer attempt)")
     args = ap.parse_args()
+    sim_only = args.sim_only or bool(os.environ.get("TENET_SIM_ONLY"))
     SPEED = 0.25 if args.fast else args.speed
     STEP = args.step or bool(os.environ.get("TENET_STEP"))
     VERBOSE = args.verbose or bool(os.environ.get("TENET_VERBOSE"))
@@ -313,26 +355,29 @@ def main() -> int:
     pause(0.7)
     step()
 
-    # 4. pay — REAL on-chain tx if TENET_REAL_PAY + funded payer; else staged line.
-    # Verbose: show the payment steps (paced, highlighted) while the real tx settles.
+    # 4. pay — real on-chain xfer by default; on failure clear + restart sim-only.
     line()
     line(f"  {GREY}paying the expert pool…{R}")
-    _ph = {}
-    _pw = threading.Thread(target=lambda: _ph.update(pay=real_payment()), daemon=True)
-    _pw.start()
-    if VERBOSE:
-        for _tag, _msg in PAY_LOG:
-            vlog(_tag, _msg)
-        _pw.join()
-    else:
-        stop = threading.Event()
-        sp = threading.Thread(target=spinner, args=(stop, "settling on algorand testnet"), daemon=True)
-        sp.start()
-        _pw.join()
-        if _ph.get("pay") is None:
-            pause(1.6)
-        stop.set(); sp.join()
-    pay = _ph.get("pay")
+    pay = None
+    if not sim_only:
+        _ph = {}
+        _pw = threading.Thread(target=lambda: _ph.update(pay=real_payment()), daemon=True)
+        _pw.start()
+        if VERBOSE:
+            for _tag, _msg in PAY_LOG:
+                vlog(_tag, _msg)
+            _pw.join()
+        else:
+            stop = threading.Event()
+            sp = threading.Thread(target=spinner, args=(stop, "settling on algorand testnet"), daemon=True)
+            sp.start()
+            _pw.join()
+            if _ph.get("pay") is None:
+                pause(1.6)
+            stop.set(); sp.join()
+        pay = _ph.get("pay")
+        if pay is None:
+            restart_sim_only()
     if pay:
         txid, label = pay
         short = f"{txid[:6]}…{txid[-4:]}"
