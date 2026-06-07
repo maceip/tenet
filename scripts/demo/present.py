@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import os
+import re
 import socket
 import sys
 import threading
@@ -216,6 +217,51 @@ def header() -> None:
     rule()
 
 
+# ---- model picker (Codex/Claude-style mode toggle: fast · high · EXPERT) ----
+def _pills(sel: int) -> str:
+    """One row: [fast] [high]  ▌ ✦ EXPERT ✦ ▐  — `sel` is the highlighted index."""
+    def small(label: str, i: int) -> str:
+        if i == sel:
+            return f"{WHITE}{B}[ {label} ]{R}"
+        return f"{GREY}[ {label} ]{R}"
+    if sel == 2:  # EXPERT selected — filled red, bold, padded (large + distinct)
+        exp = f"{B}\033[48;2;229;53;43m\033[38;2;255;255;255m   ✦ EXPERT ✦   {R}"
+    else:
+        exp = f"{RED}{B}  ✦ EXPERT ✦  {R}"
+    return f"  {GREY}model{R}   {small('fast', 0)}  {small('high', 1)}     {exp}"
+
+
+def _vis_len(s: str) -> int:
+    return len(re.sub(r"\033\[[0-9;]*m", "", s))
+
+
+def mode_toggle() -> None:
+    """The agent hesitates on a risky pick, dials the model fast→high→fast, then
+    commits to EXPERT — the cue that it's about to consult a staked human.
+    Animates in place when the pane is wide enough; stacks cleanly when narrow
+    (so a tiny window never leaves wrap artifacts)."""
+    line()
+    line(f"  {GREY}hmm — booking the cheapest could be a scam. think harder about this.{R}")
+    pause(0.5)
+    frames = [(0, 0.4), (1, 0.5), (0, 0.3), (2, 0.7)]  # fast → high → fast → EXPERT
+    try:
+        width = os.get_terminal_size(sys.stdout.fileno()).columns
+    except Exception:
+        width = 80
+    if _vis_len(_pills(2)) < width - 1:
+        for i, (sel, d) in enumerate(frames):           # in-place animation
+            prefix = "" if i == 0 else "\r\033[2K"
+            sys.stdout.write(prefix + _pills(sel)); sys.stdout.flush(); pause(d)
+        line()
+    else:
+        for sel, d in frames:                            # narrow pane: stack, no redraw
+            line(_pills(sel)); pause(d)
+    pause(0.3)
+    line(f"  {RED}{B} ✦ EXPERT ✦ {R} {GREY}selected — asking a human-staked berlin local:{R}")
+    line(f"    {WHITE}“which of A / B / C should I actually book?”{R}")
+    pause(0.5)
+
+
 # ---- the real network run (reuses berlin_pick building blocks) ----
 def run_real_flow(prompt: str, model: str, api_key, tmp: Path):
     cluster = bp.build_cluster(tmp)
@@ -340,6 +386,11 @@ def main() -> int:
     pause(0.25)
     line(f"    {B}C{R}  Loft         · €140/nt · 4.7★ · Mitte")
     pause(0.7)
+    step()
+
+    # 2b. the model picker — agent dials fast→high→fast then commits to EXPERT,
+    # and asks the expert which listing to book (that answer is what gets gated).
+    mode_toggle()
     step()
 
     # 3. the x402 gate (REAL 402 body from tenet.quantoz)
