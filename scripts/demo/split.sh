@@ -56,14 +56,16 @@ tmux set-option -t "$SESSION" pane-border-status top
 # ASKER (pane 0) = bright cyan, EXPERT (pane 1) = bright red — bold, filled bg.
 tmux set-option -t "$SESSION" pane-border-format \
   "#{?#{==:#{pane_index},0},#[bg=colour51 fg=colour16 bold],#[bg=colour196 fg=colour231 bold]}  #{pane_title}  #[default]"
-tmux set-option -t "$SESSION" pane-border-style "fg=colour238"
-tmux set-option -t "$SESSION" pane-active-border-style "fg=colour244"
+# Bright, heavy vertical separator between the two panes (same color either way).
+tmux set-option -t "$SESSION" pane-border-lines "heavy"
+tmux set-option -t "$SESSION" pane-border-style "fg=colour51 bold"
+tmux set-option -t "$SESSION" pane-active-border-style "fg=colour51 bold"
 
 # LEFT pane (0) = ASKER. After the demo finishes (or Ctrl-C), one keypress kills
 # the whole session (both panes) — no orphaned tail -f.
 tmux select-pane -t "$SESSION":0.0 -T "ASKER  ·  your agent"
 tmux send-keys -t "$SESSION":0.0 \
-  "clear; TENET_VERBOSE=1 TENET_REAL_PAY='${TENET_REAL_PAY:-}' TENET_PAY_TO='${TENET_PAY_TO:-}' TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2m── demo complete · Ctrl-b then & to exit ──\033[0m\n'; while :; do sleep 86400; done" C-m
+  "clear; TENET_STEP=1 TENET_VERBOSE=1 TENET_REAL_PAY='${TENET_REAL_PAY:-}' TENET_PAY_TO='${TENET_PAY_TO:-}' TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2m── demo complete · Ctrl-b then & to exit ──\033[0m\n'; while :; do sleep 86400; done" C-m
 
 # RIGHT pane (1) = EXPERT
 tmux split-window -h -t "$SESSION":0
