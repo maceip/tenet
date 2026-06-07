@@ -47,7 +47,13 @@ case "$CMD" in
     tmux select-pane -t "$S":0.1 -T "EXPERT NODE  ·  berlin_serve.py (process 2)"
     tmux send-keys -t "$S":0.1 "clear; TENET_NET_DIR='$DIR' '$PY' '$ROOT/scripts/demo/berlin_serve.py'" C-m
     tmux select-pane -t "$S":0.0
-    tmux attach -t "$S" ;;
+    # Attach (or switch, if already inside tmux). Never let a failed attach kill
+    # the script silently — tell the user how to reach the session.
+    if [ -n "${TMUX:-}" ]; then
+      tmux switch-client -t "$S" 2>/dev/null || echo "[net] session ready → run:  tmux attach -t $S"
+    else
+      tmux attach -t "$S" 2>/dev/null || echo "[net] session ready → run:  tmux attach -t $S"
+    fi ;;
   *)
     echo "usage: net.sh [split|serve|ask]"; exit 1 ;;
 esac
