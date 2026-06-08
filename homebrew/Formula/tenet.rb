@@ -10,7 +10,7 @@
 #   brew install tenet
 #
 # Supported (from the build-binaries workflow):
-#   macOS arm64 (Apple Silicon), macOS x86_64 (Intel), Linux x86_64, Windows (direct .exe)
+#   macOS arm64 (Apple Silicon), Linux x86_64, Windows (direct .exe)
 
 class Tenet < Formula
   desc "Privacy-preserving expert mixnet client (ask + sponsor payments rail)"
@@ -22,10 +22,6 @@ class Tenet < Formula
   on_macos do
     on_arm do
       url "https://github.com/maceip/tenet/releases/latest/download/tenet-macos-arm64"
-      sha256 :no_check
-    end
-    on_intel do
-      url "https://github.com/maceip/tenet/releases/latest/download/tenet-macos-x86_64"
       sha256 :no_check
     end
   end

@@ -42,7 +42,7 @@ and attached to [GitHub Releases](https://github.com/maceip/tenet/releases).
 
 ### Fastest path for a demo machine
 
-**macOS (Apple Silicon or Intel) / Linux**
+**macOS (Apple Silicon) / Linux**
 
 ```bash
 curl -L -o /usr/local/bin/tenet \
@@ -50,6 +50,10 @@ curl -L -o /usr/local/bin/tenet \
   && chmod +x /usr/local/bin/tenet
 tenet --help
 ```
+
+Intel Macs: use `pipx install git+https://github.com/maceip/tenet.git` or build from
+source (`python3 scripts/build_binary.py --name tenet`). CI ships `tenet-macos-arm64`
+only.
 
 **Windows** — download `tenet-windows-x86_64.exe` from the latest Release, rename
 to `tenet.exe`, and put it on `PATH`.

@@ -33,7 +33,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e . pytest pytest-cov
       - name: Run suite
-        run: pytest -q --cov=por
+        run: pytest -q --cov=tenet
 
   build:
     name: ${{ matrix.target }}
