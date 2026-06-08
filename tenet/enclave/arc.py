@@ -12,10 +12,13 @@ from dataclasses import asdict, dataclass
 from typing import Mapping
 from uuid import uuid4
 
-from tenet.schema import normalize_schema, supports_schema
+from tenet.schema import legacy_schema_name, normalize_schema, supports_schema
 
 
 NOOP_ARC_CREDENTIAL_VERSION = "tenet.arc.noop_credential.2026-06"
+# Live Nitro EIF (deployed 2026-06-04) predates the tenet rename and only accepts
+# the legacy por.* wire name. Outbound requests must emit this until EIF is redeployed.
+WIRE_ARC_CREDENTIAL_VERSION = legacy_schema_name(NOOP_ARC_CREDENTIAL_VERSION)
 
 
 @dataclass(frozen=True)
@@ -33,7 +36,7 @@ class NoopArcCredential:
         now: float | None = None,
     ) -> "NoopArcCredential":
         return cls(
-            version=NOOP_ARC_CREDENTIAL_VERSION,
+            version=WIRE_ARC_CREDENTIAL_VERSION,
             presentation_id=uuid4().hex,
             epoch=epoch,
             issued_at=time.time() if now is None else now,
