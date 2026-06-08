@@ -12,3 +12,4 @@ cd ~/tenet-www && npm run build         # then deploy dist/ to public.computer/t
 
 - alpha (v0.1.1)
 - beta (v0.1.2)
+- gamma (v0.1.3)
