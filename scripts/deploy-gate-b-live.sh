@@ -43,15 +43,15 @@ SG_ID=$(aws ec2 describe-instances --filters "Name=ip-address,Values=${NITRO_HOS
 aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol udp --port "$RELAY_PORT" --cidr 0.0.0.0/0 2>/dev/null || true
 
 echo "[network-beta] sync repo to ${NITRO_HOST}"
-ssh -i "$NITRO_KEY" -o StrictHostKeyChecking=accept-new "${NITRO_USER}@${NITRO_HOST}" "mkdir -p ~/sphinx-tahoe"
+ssh -i "$NITRO_KEY" -o StrictHostKeyChecking=accept-new "${NITRO_USER}@${NITRO_HOST}" "mkdir -p ~/tenet"
 rsync -az --delete -e "ssh -i $NITRO_KEY" \
   --exclude .git --exclude .venv --exclude deploy/eif-build --exclude 'oblivious-core/target' \
-  "$ROOT/" "${NITRO_USER}@${NITRO_HOST}:~/sphinx-tahoe/"
+  "$ROOT/" "${NITRO_USER}@${NITRO_HOST}:~/tenet/"
 
 echo "[network-beta] start reach relay on Nitro (background)"
 ssh -i "$NITRO_KEY" "${NITRO_USER}@${NITRO_HOST}" bash -s <<REMOTE
 set -euo pipefail
-cd ~/sphinx-tahoe
+cd ~/tenet
 pkill -f 'tenet run --config.*live-reach-relay' 2>/dev/null || true
 for i in \$(seq 1 20); do
   if ! ss -lun | grep -q ':${RELAY_PORT} '; then
@@ -116,7 +116,7 @@ tail -20 /tmp/tenet-expert.log || true
 
 echo "[network-beta] export peer_address from relay"
 ssh -i "$NITRO_KEY" "${NITRO_USER}@${NITRO_HOST}" bash -s <<REMOTE
-cd ~/sphinx-tahoe
+cd ~/tenet
 python3 scripts/export-relay-peer-address.py \
   --export-dir "$REACH_EXPORT_DIR" \
   --peer-id "${HANDLE_TOKEN}" > /tmp/peer-address.json
@@ -135,8 +135,8 @@ python3 scripts/build-beta-enclave-data.py \
 
 echo "[network-beta] sync rebuilt beta enclave data to ${NITRO_HOST}"
 rsync -az --delete -e "ssh -i $NITRO_KEY" \
-  "$ROOT/deploy/data/beta/" "${NITRO_USER}@${NITRO_HOST}:~/sphinx-tahoe/deploy/data/beta/"
+  "$ROOT/deploy/data/beta/" "${NITRO_USER}@${NITRO_HOST}:~/tenet/deploy/data/beta/"
 
 echo "[network-beta] beta enclave data built — redeploy Nitro EIF (item 14 prod) required:"
-echo "  ssh ${NITRO_USER}@${NITRO_HOST} 'cd ~/sphinx-tahoe && ./deploy/assemble-matcher-eif.sh && ...'"
+echo "  ssh ${NITRO_USER}@${NITRO_HOST} 'cd ~/tenet && ./deploy/assemble-matcher-eif.sh && ...'"
 echo "[network-beta] then: ./scripts/demo-gate-b-e2e.sh"

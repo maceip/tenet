@@ -1,4 +1,4 @@
-# Shared attested-workload pin for sphinx-tahoe scripts.
+# Shared attested-workload pin for tenet deploy scripts.
 # Source from other scripts: . "$(dirname "$0")/pinned-sha.sh"
 
 ATTESTED_WORKLOAD_REPO="${ATTESTED_WORKLOAD_REPO:-$HOME/attested-workload}"

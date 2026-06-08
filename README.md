@@ -34,6 +34,52 @@ real txid you can open on the explorer.
 and payment/answer are sequential — paying isn't yet cryptographically bound to
 unlocking the answer.
 
+## Install the client (Linux / macOS / Windows)
+
+Pre-built single-file binaries for the `tenet` CLI are produced by the
+[`build-binaries`](.github/workflows/build-binaries.yml) workflow on every push
+and attached to [GitHub Releases](https://github.com/maceip/tenet/releases).
+
+### Fastest path for a demo machine
+
+**macOS (Apple Silicon or Intel) / Linux**
+
+```bash
+curl -L -o /usr/local/bin/tenet \
+  "https://github.com/maceip/tenet/releases/latest/download/tenet-$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')-$(uname -m | sed 's/x86_64/x86_64/;s/arm64/arm64/;s/aarch64/arm64/')" \
+  && chmod +x /usr/local/bin/tenet
+tenet --help
+```
+
+**Windows** — download `tenet-windows-x86_64.exe` from the latest Release, rename
+to `tenet.exe`, and put it on `PATH`.
+
+**No global install**
+
+```bash
+pipx install git+https://github.com/maceip/tenet.git
+# or: uv tool install git+https://github.com/maceip/tenet.git
+```
+
+### Homebrew (non-cask CLI)
+
+```bash
+brew install --formula https://raw.githubusercontent.com/maceip/tenet/master/homebrew/Formula/tenet.rb
+# or: brew tap maceip/tenet https://github.com/maceip/tenet && brew install tenet
+```
+
+### From source (this repo)
+
+```bash
+git clone https://github.com/maceip/tenet.git ~/tenet && cd ~/tenet
+python3 -m venv .venv && . .venv/bin/activate && pip install -e .
+./scripts/demo/run-safe.sh          # resilient demo cascade
+./scripts/demo/split.sh             # split-pane asker | expert
+```
+
+Build a release binary locally: `python3 scripts/build_binary.py --name tenet`
+→ `dist/tenet-<platform>`.
+
 ## What's implemented
 
 - **Mixnet routing** — `tenet.mixnet`: relay runtime, wire frames, QUIC,

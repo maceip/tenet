@@ -1,6 +1,6 @@
 """Client-side attestation gate for the enclave plane.
 
-This is the sphinx-tahoe side of the TEE hardening (STATUS.md item 4).
+This is the tenet client side of the TEE hardening (STATUS.md item 4).
 The wire shape from ``enclave_plane.py`` stays unchanged; this module decides
 *whether to trust* an enclave-plane endpoint before any matcher/mailbox call is
 issued.
@@ -14,7 +14,7 @@ invariant: "do not modify the core quote verifier"). The cryptographic checks
 (quote signature chain, ``report_data`` binding, ``sha256(cert_spki) ==
 eat.tls_spki_hash`` channel binding, Value X registry lookup) are delegated to
 ``aw check <url>`` (attested-workload ``src/main.rs`` ``cmd_check``). What lives
-here is the policy sphinx-tahoe owns: which Value X builds we accept,
+here is the policy tenet owns: which Value X builds we accept,
 which TEE platforms we accept, and **fail-closed** enforcement — the client never
 silently downgrades to an unattested transport (rule R1: security level is a
 network property, not a per-call toggle).
@@ -49,7 +49,7 @@ _PLATFORM_NORMALIZE = {"tdx": "tdx", "nitro": "nitro", "sevsnp": "sev-snp", "snp
 class VerifiedAttestation:
     """A receipt whose cryptographic checks have already passed (in runcards).
 
-    The fields here are what sphinx-tahoe *policy* reasons about. The crypto that
+    The fields here are what tenet *policy* reasons about. The crypto that
     proves they are authentic (quote chain + channel binding) happened in the
     verifier before this object was constructed.
     """
@@ -63,7 +63,7 @@ class VerifiedAttestation:
 
 @dataclass(frozen=True)
 class EnclaveTrustPolicy:
-    """sphinx-tahoe-owned acceptance policy over a verified attestation."""
+    """tenet-owned acceptance policy over a verified attestation."""
 
     approved_value_x: frozenset[str]
     accepted_platforms: frozenset[str] = ACCEPTED_TEE_PLATFORMS

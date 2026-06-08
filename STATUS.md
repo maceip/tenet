@@ -1,4 +1,4 @@
-# tenet / sphinx-tahoe — STATUS
+# tenet — STATUS
 
 **The only living document for planning, design, status, and TODO.**
 
@@ -242,7 +242,7 @@ screen -dmS tenet-expert /bin/zsh -lc '
   source /Users/mac/fry-core/.env
   set +a
   export POR_MAX_TOKENS=512
-  cd /Users/mac/sphinx-tahoe
+  cd /Users/mac/tenet
   exec python3 -m tenet run --config config/expert-laptop.json \
     --node-id hb85f9afbccddfe5 >>/tmp/tenet-expert.log 2>&1
 '
@@ -403,5 +403,5 @@ Pytest: default excludes `live`; tiers in `scripts/test.sh`.
 
 | Repo | Role |
 |------|------|
-| **sphinx-tahoe** | Product + deploy |
+| **tenet** | Product + deploy |
 | **attested-workload** | `aw check`, Nitro proxy, attested TLS |

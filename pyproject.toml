@@ -11,7 +11,7 @@ authors = [
   { name = "George Danezis", email = "g.danezis@ucl.ac.uk" },
 ]
 requires-python = ">=3.10"
-urls = { Homepage = "http://sphinxmix.readthedocs.io/en/latest/" }
+urls = { Homepage = "https://github.com/maceip/tenet" }
 
 # Runtime dependencies. These are the packages another machine needs to
 # `uv pip install -e .` (or `uv sync` after adding a lock) and run the tenet

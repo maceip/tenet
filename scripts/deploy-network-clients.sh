@@ -51,7 +51,7 @@ if ! command -v aw >/dev/null; then
     || cargo install --git https://github.com/maceip/attested-workload \
     --rev 79a5ea2328f2b30192e57b53913355dcd5e0201e --bin aw --force
 fi
-mkdir -p ~/sphinx-tahoe ~/asker-bundle
+mkdir -p ~/tenet ~/asker-bundle
 '''
 
 
@@ -187,7 +187,7 @@ def _deploy_legacy_linux(client):
     subprocess.run(
         ["rsync", "-az", "-e", f"ssh -i {key} -o StrictHostKeyChecking=accept-new",
          "--exclude", ".git", "--exclude", "build", "--exclude", "dist", "--exclude", "deploy/eif-build",
-         str(root) + "/", f"{remote}:~/sphinx-tahoe/"],
+         str(root) + "/", f"{remote}:~/tenet/"],
         check=True,
     )
     subprocess.run(
@@ -197,7 +197,7 @@ def _deploy_legacy_linux(client):
     )
     cmd = f"""
 {remote_setup}
-cd ~/sphinx-tahoe
+cd ~/tenet
 python3 -m pip install --user -q -e . 2>/dev/null || python3 -m pip install --user -q .
 cd ~
 rm -rf asker-bundle && unzip -o -q asker-bundle.zip

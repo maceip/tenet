@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build bountynet-bin from attested-workload for sphinx-tahoe EIF images.
+# Build bountynet-bin from attested-workload for tenet EIF images.
 #
 # Usage:
 #   ATTESTED_WORKLOAD_REPO=~/attested-workload ATTESTED_WORKLOAD_SHA=<git-sha> \
 #     ./deploy/build-bountynet-bin.sh
 #
-# Writes ./bountynet-bin in the current directory (typically sphinx-tahoe root).
+# Writes ./bountynet-bin in the current directory (typically tenet repo root).
 set -euo pipefail
 
 REPO="${ATTESTED_WORKLOAD_REPO:-$HOME/attested-workload}"

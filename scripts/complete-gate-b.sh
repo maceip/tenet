@@ -47,16 +47,16 @@ echo "[network-beta] sync to relay host (Nitro) + expert VM"
 rsync -az \
   -e "ssh -i $RELAY_KEY" \
   --exclude .git --exclude .venv --exclude 'oblivious-core/target' --exclude deploy/eif-build \
-  "$ROOT/" "${RELAY_USER}@${RELAY_HOST}:~/sphinx-tahoe/"
+  "$ROOT/" "${RELAY_USER}@${RELAY_HOST}:~/tenet/"
 rsync -az \
   -e "ssh -i $EXPERT_KEY" \
   --exclude .git --exclude .venv --exclude 'oblivious-core/target' \
-  "$ROOT/" "${EXPERT_USER}@${EXPERT_HOST}:~/sphinx-tahoe/"
+  "$ROOT/" "${EXPERT_USER}@${EXPERT_HOST}:~/tenet/"
 
 echo "[network-beta] ensure reach relay on Nitro only"
 ssh -i "$RELAY_KEY" "${RELAY_USER}@${RELAY_HOST}" bash -s <<'REMOTE'
 set -euo pipefail
-cd ~/sphinx-tahoe
+cd ~/tenet
 python3 -m pip install --user -q dilithium-py pynacl cryptography 2>/dev/null || true
 pgrep -f live-reach-relay.json >/dev/null || {
   setsid python3 -m tenet run --config config/live-reach-relay.json --node-id reach-beta-1 \
@@ -70,7 +70,7 @@ REMOTE
 echo "[network-beta] expert on separate VM ($EXPERT_HOST) — REACH to public relay $RELAY_HOST"
 ssh -i "$EXPERT_KEY" "${EXPERT_USER}@${EXPERT_HOST}" bash -s <<REMOTE
 set -euo pipefail
-cd ~/sphinx-tahoe
+cd ~/tenet
 sudo apt-get update -qq 2>/dev/null || true
 sudo apt-get install -y -qq python3 python3-pip 2>/dev/null || true
 python3 -m pip install --user -q dilithium-py pynacl cryptography 2>/dev/null || true
@@ -103,7 +103,7 @@ REACH_RELAY_HOST="$RELAY_HOST" VERIFY_PEER_ID="$HANDLE" "$ROOT/scripts/verify-re
 
 echo "[network-beta] peer_address from relay (Nitro)"
 ssh -i "$RELAY_KEY" "${RELAY_USER}@${RELAY_HOST}" \
-  "cd ~/sphinx-tahoe && python3 scripts/export-relay-peer-address.py \
+  "cd ~/tenet && python3 scripts/export-relay-peer-address.py \
     --config config/live-reach-relay.json --node-id reach-beta-1 --peer-id ${HANDLE}" \
   > /tmp/peer-address.json
 
@@ -114,15 +114,15 @@ PYTHONPATH=. python3 "$ROOT/scripts/sync-gate-b-artifacts.py" \
   --peer-address-json /tmp/peer-address.json >/dev/null
 echo "[network-beta] synced mailbox for $HANDLE"
 
-ssh -i "$RELAY_KEY" "${RELAY_USER}@${RELAY_HOST}" "mkdir -p ~/sphinx-tahoe/deploy/eif-build/app/data/beta"
+ssh -i "$RELAY_KEY" "${RELAY_USER}@${RELAY_HOST}" "mkdir -p ~/tenet/deploy/eif-build/app/data/beta"
 rsync -az "$ROOT/deploy/data/beta/" \
   -e "ssh -i $RELAY_KEY" \
-  "${RELAY_USER}@${RELAY_HOST}:~/sphinx-tahoe/deploy/eif-build/app/data/beta/"
+  "${RELAY_USER}@${RELAY_HOST}:~/tenet/deploy/eif-build/app/data/beta/"
 
 echo "[network-beta] EIF rebuild on Nitro (matcher only — expert stays off this host)"
 ssh -i "$RELAY_KEY" "${RELAY_USER}@${RELAY_HOST}" bash -s <<'REMOTE'
 set -euo pipefail
-cd ~/sphinx-tahoe
+cd ~/tenet
 export ATTESTED_WORKLOAD_REPO=~/attested-workload ATTESTED_WORKLOAD_SHA=79a5ea2328f2b30192e57b53913355dcd5e0201e
 [[ -d ~/attested-workload/.git ]] || git clone https://github.com/maceip/attested-workload.git ~/attested-workload
 ./deploy/assemble-matcher-eif.sh
@@ -130,7 +130,7 @@ cd deploy/eif-build
 docker build -t matcher-beta:latest . >>/tmp/docker-build.log 2>&1
 nitro-cli build-enclave --docker-uri matcher-beta:latest \
   --output-file ~/tenet-nitro-deploy/matcher-gateb-final.eif >>/tmp/nitro-build.log 2>&1
-EIF=~/tenet-nitro-deploy/matcher-gateb-final.eif ~/sphinx-tahoe/deploy/redeploy-matcher-eif.sh >>/tmp/redeploy.log 2>&1
+EIF=~/tenet-nitro-deploy/matcher-gateb-final.eif ~/tenet/deploy/redeploy-matcher-eif.sh >>/tmp/redeploy.log 2>&1
 sudo /usr/local/bin/bountynet check --json https://127.0.0.1/ 2>/dev/null | tee /tmp/aw-check.json
 REMOTE
 

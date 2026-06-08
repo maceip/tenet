@@ -12,7 +12,7 @@ else
 fi
 cd "$SRC"
 if [[ ! -f tenet/edges/cli/main.py ]]; then
-  tar xzf "$BASE/sphinx-tahoe.tgz" -C "$SRC"
+  tar xzf "$BASE/tenet.tgz" -C "$SRC"
 fi
 
 PY=python3

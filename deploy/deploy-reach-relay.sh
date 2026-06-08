@@ -6,8 +6,8 @@
 #
 # Usage on the relay VM:
 #   scp config/live-reach-relay.json user@relay:~/live-reach-relay.json
-#   scp -r tenet user@relay:~/sphinx-tahoe/
-#   ssh user@relay 'cd sphinx-tahoe && python3 -m tenet run --config ~/live-reach-relay.json --node-id reach-beta-1'
+#   scp -r tenet user@relay:~/tenet/
+#   ssh user@relay 'cd ~/tenet && python3 -m tenet run --config ~/live-reach-relay.json --node-id reach-beta-1'
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

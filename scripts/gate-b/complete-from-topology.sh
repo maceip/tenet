@@ -15,7 +15,7 @@ HANDLE=$(ssh -i ~/.ssh/tenet-nitro.pem "ubuntu@$(python3 -c "import json; print(
 
 source config/beta-secrets.env
 ssh -i ~/.ssh/tenet-nitro.pem "ec2-user@${RELAY_HOST}" \
-  "cd ~/sphinx-tahoe && python3 scripts/export-relay-peer-address.py \
+  "cd ~/tenet && python3 scripts/export-relay-peer-address.py \
     --config config/live-reach-relay.json --node-id reach-beta-1 --peer-id ${HANDLE}" \
   > /tmp/peer-address.json
 

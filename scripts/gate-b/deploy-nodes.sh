@@ -34,10 +34,10 @@ RELAY_KEY=~/.ssh/tenet-nitro.pem
 
 echo "[deploy] reach relay node @ $RELAY_HOST"
 rsync -az -e "ssh -i $RELAY_KEY" --exclude .git --exclude .venv --exclude deploy/eif-build \
-  "$ROOT/" "ec2-user@${RELAY_HOST}:~/sphinx-tahoe/"
+  "$ROOT/" "ec2-user@${RELAY_HOST}:~/tenet/"
 ssh -i "$RELAY_KEY" "ec2-user@${RELAY_HOST}" bash -s <<'REMOTE'
 set -euo pipefail
-cd ~/sphinx-tahoe
+cd ~/tenet
 python3 -m pip install --user -q dilithium-py pynacl cryptography 2>/dev/null || true
 # Align with modern pyproject/uv packaging for the core (Kademlia etc.).
 python3 -m pip install --user -q uv || true
@@ -129,13 +129,13 @@ for index, node in enumerate(experts_nodes):
             "--exclude",
             ".venv",
             f"{root}/",
-            f"ubuntu@{host}:~/sphinx-tahoe/",
+            f"ubuntu@{host}:~/tenet/",
         ],
         check=True,
     )
 
     remote = f"""set -euo pipefail
-cd ~/sphinx-tahoe
+cd ~/tenet
 sudo apt-get update -qq && sudo apt-get install -y -qq python3 python3-pip
 python3 -m pip install --user -q dilithium-py pynacl cryptography || true
 # Modern packaging: prefer uv (from pyproject.toml) so the installed tenet

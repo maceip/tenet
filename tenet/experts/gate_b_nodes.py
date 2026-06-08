@@ -49,7 +49,7 @@ def ssh_run(host: RoleHost, remote_script: str, *, timeout: float = 120.0) -> st
 
 def rsync_repo(host: RoleHost) -> None:
     key = os.path.expanduser(host.ssh_key or "~/.ssh/tenet-nitro.pem")
-    dest = f"{host.ssh_user}@{host.host}:~/sphinx-tahoe/"
+    dest = f"{host.ssh_user}@{host.host}:~/tenet/"
     subprocess.run(
         [
             "rsync",
@@ -78,7 +78,7 @@ def reach_register_from_expert_node(topology: GateBTopology, expert: RoleHost, p
     script = textwrap.dedent(
         f"""
         set -euo pipefail
-        cd ~/sphinx-tahoe
+        cd ~/tenet
         python3 -m pip install --user -q dilithium-py pynacl cryptography 2>/dev/null || true
         python3 -c "
         import socket
@@ -98,7 +98,7 @@ def export_peer_address_on_relay(topology: GateBTopology, peer_id: str) -> dict:
     script = textwrap.dedent(
         f"""
         set -euo pipefail
-        cd ~/sphinx-tahoe
+        cd ~/tenet
         python3 scripts/export-relay-peer-address.py \\
           --config config/live-reach-relay.json \\
           --node-id reach-beta-1 \\
