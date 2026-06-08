@@ -75,6 +75,8 @@ def emit_log_event(
     fmt: str = "json",
     redact_fields: set[str] | frozenset[str] = DEFAULT_REDACT_FIELDS,
 ) -> None:
+    if fmt == "silent":
+        return  # embedded runtimes (e.g. relay inside the interactive client) stay quiet
     output = sys.stdout if stream is None else stream
     output.write(format_log_event(event, fmt=fmt, redact_fields=redact_fields) + "\n")
     output.flush()

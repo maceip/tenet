@@ -139,6 +139,9 @@ def _build_supernode_daemon(pack, pack_path, *, internal_port: int, public_ip: s
                     "heartbeat_interval_seconds": 120,
                     "registration_ttl_seconds": 86400,
                 },
+                # Stay quiet: the relay runs in a background thread inside the
+                # interactive client — its logs must not stomp the prompt.
+                "logging": {"level": "silent", "fmt": "silent"},
                 "control": {"bootstrap_path": str(boot_path)},
             }
         },
