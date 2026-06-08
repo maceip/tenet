@@ -149,34 +149,41 @@ def _build_supernode_daemon(pack, pack_path, *, internal_port: int, public_ip: s
     return por.daemon(node_id), por, node_id
 
 
-def _promote_to_relay(pack, pack_path, verdict: dict, internal_port: int, log) -> None:
+def _promote_to_relay(pack, pack_path, verdict: dict, internal_port: int) -> tuple[bool, str]:
     """A directly-reachable client opts into the relay capability and actually
     runs the supernode: advertises ``reachability_relay`` into the control plane
-    and forwards opaque traffic for NATed clients (a dumb NAT forwarder)."""
+    and forwards opaque traffic for NATed clients (a dumb NAT forwarder).
+
+    Returns ``(serving, detail)``. Prints nothing — the caller reflects state in
+    the status header, so nothing races the interactive prompt."""
     import tempfile
 
     endpoint = verdict.get("endpoint") or ""
     public_ip = endpoint.split(":")[0] if endpoint else "0.0.0.0"
-    log(f"directly reachable at {endpoint} via {verdict.get('method')} → starting relay")
     tmpdir = tempfile.mkdtemp(prefix="tenet-relay-")
     try:
         daemon, por, node_id = _build_supernode_daemon(
             pack, pack_path, internal_port=internal_port, public_ip=public_ip, tmpdir=tmpdir
         )
     except Exception as exc:
-        log(f"relay not started (config/bootstrap unavailable): {exc}")
-        return
+        return False, f"relay unavailable: {exc}"
 
     from tenet.edges.cli.supernode import run_supernode_cluster
 
     def _serve() -> None:
         try:
             run_supernode_cluster(daemon, por)
-        except Exception as exc:  # pragma: no cover - runtime guard
-            log(f"relay runtime stopped: {exc}")
+        except Exception:  # pragma: no cover - runtime guard
+            pass
 
-    threading.Thread(target=_serve, daemon=True, name="tenet-relay").start()
-    log(f"relaying as {node_id} on udp/{internal_port}, advertising {public_ip} for NATed clients")
+    t = threading.Thread(target=_serve, daemon=True, name="tenet-relay")
+    t.start()
+    # If the runtime dies immediately (e.g. control bootstrap can't validate),
+    # report failure so the relay light goes red instead of a false green.
+    t.join(timeout=1.2)
+    if not t.is_alive():
+        return False, "relay failed to start (control plane unavailable)"
+    return True, f"relaying as {node_id} · advertising {public_ip} for NATed clients"
 
 
 def _ask_once(pack, prompt: str, *, timeout: float = 120.0) -> dict:
@@ -192,6 +199,9 @@ def _ask_once(pack, prompt: str, *, timeout: float = 120.0) -> dict:
         prompt=prompt,
         timeout=timeout,
         control_service=pack.to_control_service(),
+        match_gossip_salt=pack.query_epoch_salt,
+        default_pool=pack.default_pool,
+        dataset_commitment=pack.dataset_commitment,
     )
 
 
@@ -219,6 +229,48 @@ def _run_query(pack, prompt: str, timeout: float) -> int:
     return 0 if result.get("ok") else 1
 
 
+# ---- toy traffic-light status header ----
+# Each light is a 3-lamp cluster (red · yellow · green); one lamp lit per state.
+# conn is always shown; relay/expert are hidden until the node takes that role.
+_OFF, _S_RED, _S_YEL, _S_GRN = "off", "red", "yellow", "green"
+_LAMP_COLOR = {
+    "red": "\033[38;2;229;53;43m",
+    "yellow": "\033[38;2;255;211;77m",
+    "green": "\033[38;2;90;209;122m",
+}
+_LAMP_DIM = "\033[38;2;64;64;64m"
+
+
+class _Status:
+    """Live client status; mutated by the background probe, read by the header."""
+
+    def __init__(self) -> None:
+        self.conn = _OFF      # green=verified · yellow=degraded · red=down
+        self.relay = _OFF     # hidden until promoted; yellow=promoting · green=relaying · red=failed
+        self.expert = _OFF    # hidden until serving as an expert
+
+
+def _light(label: str, state: str) -> str:
+    if state == _OFF:
+        return ""
+    if not _color_ok():
+        return f"{label}[{ {'red': 'R', 'yellow': 'Y', 'green': 'G'}.get(state, '?') }]"
+    lamps = "".join(
+        f"{(_LAMP_COLOR[c] if state == c else _LAMP_DIM)}⏺{_R}"
+        for c in ("red", "yellow", "green")
+    )
+    return f"{_GRY}{label}{_R} {lamps}"
+
+
+def _render_header(status: "_Status") -> str:
+    cells = [_c(_RED + _B, "▟▛ tenet"), _light("conn", status.conn)]
+    if status.relay != _OFF:
+        cells.append(_light("relay", status.relay))
+    if status.expert != _OFF:
+        cells.append(_light("expert", status.expert))
+    return "  " + "    ".join(c for c in cells if c)
+
+
 def run_default_client(
     join_pack_path: str | Path | None = None,
     *,
@@ -236,58 +288,61 @@ def run_default_client(
 
     pack_path = resolve_join_pack_path(join_pack_path)
     pack = None
-    matcher_host = "unconfigured"
     warn = None
+    status = _Status()
+    detail = {"matcher": "unconfigured", "relay": "probing…", "expert": "not serving"}
     if pack_path.is_file():
-        matcher_host = _peek_matcher_host(pack_path) or matcher_host
+        detail["matcher"] = _peek_matcher_host(pack_path) or detail["matcher"]
         try:
             pack = JoinPack.load(pack_path)
-            matcher_host = urlparse(pack.matcher_url()).hostname or matcher_host
+            status.conn = _S_GRN
+            detail["matcher"] = urlparse(pack.matcher_url()).hostname or detail["matcher"]
         except Exception as exc:
             warn = f"join-pack pins unverified ({exc})"
+            status.conn = _S_YEL
     else:
         warn = f"no join-pack at {pack_path}"
+        status.conn = _S_RED
 
-    print(_c(_RED + _B, "  ▟▛ tenet") + "  "
-          + _c(_GRY, f"{'connected · ' if pack else ''}matcher {matcher_host}"))
-    if warn:
-        print(_c(_GRY, f"  ! {warn} → diagnostic mode (reachability runs, queries disabled)"))
-
-    # Reachability + relay promotion run in the background so the prompt is instant.
     relay_port = int(os.environ.get("TENET_RELAY_PORT", "0") or 0) or _reserve_udp_port()
 
+    # Reachability + relay promotion run in the background and update `status`
+    # SILENTLY (no prints) — so nothing races the prompt. The header reprints
+    # each turn and self-updates as the relay light resolves.
     def _probe() -> None:
         forced = os.environ.get("TENET_FORCE_REACHABLE")  # "ip:port" to exercise relay behind NAT
-        if forced:
-            v = {"reachable": True, "endpoint": forced, "method": "forced", "detail": "forced"}
-        else:
-            v = detect_reachability(relay_port)
-        if v["reachable"]:
-            print(_c(_GRN, f"  ◆ directly reachable: {v['endpoint']} ({v['method']})"))
-            if pack is None:
-                print(_c(_GRY, "  relay · need a verified join-pack to advertise into the control plane"))
-            elif enable_relay:
-                _promote_to_relay(pack, pack_path, v, relay_port,
-                                  lambda m: print(_c(_GRY, f"  relay · {m}")))
-            else:
-                print(_c(_GRY, "  relay · auto-promotion disabled (--no-relay)"))
-        else:
-            print(_c(_GRY, f"  ○ behind NAT ({v['detail']}) → asker only, via bootstrap relay"))
+        v = ({"reachable": True, "endpoint": forced, "method": "forced"} if forced
+             else detect_reachability(relay_port))
+        if not v["reachable"]:
+            detail["relay"] = "behind NAT — asker only, via bootstrap relay"
+            return
+        if pack is None:
+            detail["relay"] = "reachable · need a verified join-pack to relay"
+            return
+        if not enable_relay:
+            detail["relay"] = "reachable · relay disabled (--no-relay)"
+            return
+        status.relay = _S_YEL
+        detail["relay"] = f"promoting at {v['endpoint']}…"
+        serving, info = _promote_to_relay(pack, pack_path, v, relay_port)
+        status.relay = _S_GRN if serving else _S_RED
+        detail["relay"] = info
 
-    probe = threading.Thread(target=_probe, daemon=True)
-    probe.start()
+    threading.Thread(target=_probe, daemon=True, name="tenet-probe").start()
+
+    print(_render_header(status))
+    if warn:
+        print(_c(_GRY, f"  ! {warn} → diagnostic mode (queries disabled)"))
 
     # One-shot: explicit prompt, or piped stdin with no TTY.
     if prompt is not None:
-        probe.join(timeout=6.0)
         return _run_query(pack, prompt, timeout)
     if not sys.stdin.isatty():
-        probe.join(timeout=6.0)
-        print(_c(_GRY, "  (no prompt; status only — pass --prompt or run in a terminal to ask)"))
+        print(_c(_GRY, "  (status only — pass --prompt or run in a terminal to ask)"))
         return 0
 
-    # Interactive asker TUI.
-    print(_c(_GRY, "  ask anything · Ctrl-D or /quit to exit"))
+    # Interactive asker TUI — header reprinted above each prompt so it stays put.
+    print(_c(_GRY, "  ask anything · /status · Ctrl-D or /quit to exit"))
     rc = 0
     while True:
         try:
@@ -299,4 +354,11 @@ def run_default_client(
             continue
         if line in ("/quit", "/exit", "/q"):
             return rc
+        if line == "/status":
+            print(_render_header(status))
+            print(_c(_GRY, f"    matcher  {detail['matcher']}"))
+            print(_c(_GRY, f"    relay    {detail['relay']}"))
+            print(_c(_GRY, f"    expert   {detail['expert']}"))
+            continue
         rc = _run_query(pack, line, timeout)
+        print(_render_header(status))
