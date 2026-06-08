@@ -223,6 +223,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--path", default="/v1/expert")
     serve.add_argument("--status-path", default="/v1/status")
     serve.add_argument("--timeout", type=float, default=120.0)
+    serve.add_argument(
+        "--offline",
+        action="store_true",
+        help="Disable all networking; replay the Berlin demo over local HTTP/SSE only.",
+    )
 
     return parser
 
@@ -286,12 +291,13 @@ def dispatch(args: argparse.Namespace) -> int:
         from tenet.edges.cli.serve import run_serve
 
         return run_serve(
-            join_pack_path=args.join_pack,
+            join_pack_path=None if args.offline else args.join_pack,
             host=args.host,
             port=args.port,
             path=args.path,
             status_path=args.status_path,
             timeout=args.timeout,
+            offline=args.offline,
         )
 
     if args.command == "sponsor":
