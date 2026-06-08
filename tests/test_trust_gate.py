@@ -144,7 +144,8 @@ def test_load_trust_state_fails_closed_on_bad_signature(tmp_path):
     assert st.state == UNKNOWN
 
 
-def test_load_trust_state_unknown_without_source(tmp_path):
+def test_load_trust_state_fails_soft_on_unreachable_source(tmp_path):
     pack = _Pack({"join-pack-root": "00"})
-    st = load_trust_state(pack, self_hash="deadbeef")
+    # Unreachable source -> fail soft to UNKNOWN, never raises (offline, no network).
+    st = load_trust_state(pack, url=f"file://{tmp_path}/nope.json", self_hash="deadbeef")
     assert st.state == UNKNOWN

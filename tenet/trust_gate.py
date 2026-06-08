@@ -34,6 +34,12 @@ UNKNOWN = "unknown"
 
 TRUST_BUNDLE_SCHEMA = "tenet.trust_update_bundle.2026-06"
 
+# Where the signed bundle ships by default (CI attaches it to each release).
+# Override with TENET_TRUST_UPDATE_URL or a join-pack ``trust_update_url`` pin.
+DEFAULT_TRUST_UPDATE_URL = (
+    "https://github.com/maceip/tenet/releases/latest/download/trust-update.json"
+)
+
 
 @dataclass(frozen=True)
 class TrustState:
@@ -118,7 +124,8 @@ def load_trust_state(
     → a ``trust_update_url`` pinned in the join-pack.
     """
     resolved_hash = self_code_hash() if self_hash is None else self_hash
-    src = url or os.environ.get("TENET_TRUST_UPDATE_URL") or getattr(pack, "trust_update_url", None)
+    src = (url or os.environ.get("TENET_TRUST_UPDATE_URL")
+           or getattr(pack, "trust_update_url", None) or DEFAULT_TRUST_UPDATE_URL)
     if not src:
         return TrustState(UNKNOWN, resolved_hash, None, "no trust-update source pinned")
 
