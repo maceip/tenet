@@ -79,24 +79,104 @@ def detect_reachability(internal_port: int = 0) -> dict:
             "detail": res.error or "no NAT mapping (behind NAT)"}
 
 
-def _promote_to_relay(pack, verdict: dict, log) -> None:
-    """A directly-reachable client opts into the relay capability.
+def _reserve_udp_port() -> int:
+    """Pick a free UDP port for the relay bind (and the UPnP mapping)."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind(("0.0.0.0", 0))
+        return int(s.getsockname()[1])
+    finally:
+        s.close()
 
-    The public endpoint to advertise has already been acquired (UPnP/NAT-PMP).
-    Standing up a live supernode runtime that registers ``reachability_relay``
-    into the join-pack control plane (``run_supernode_cluster`` needs a
-    DaemonConfig synthesized from ``pack.control_bootstrap`` + the mapped
-    endpoint + a generated relay identity) is the hardening step; until then we
-    surface the relay-ready endpoint without joining the live control DHT.
+
+def _build_supernode_daemon(pack, pack_path, *, internal_port: int, public_ip: str, tmpdir: str):
+    """Synthesize a 2026-06 supernode daemon config from the join-pack.
+
+    A reachable client becomes a real relay: a fresh KEM identity + relay
+    secret, bound to ``internal_port``, advertising ``public_ip``, and carrying
+    the join-pack's control bootstrap verbatim so it joins the same control
+    plane the askers trust. Returns ``(daemon, por_config, node_id)``.
     """
-    endpoint = verdict.get("endpoint")
-    log(f"directly reachable at {endpoint} via {verdict.get('method')} "
-        f"→ eligible to relay for NATed clients")
-    # HARDEN: from tenet.edges.cli.supernode import run_supernode_cluster
-    #   daemon = synthesize_supernode_daemon(pack, endpoint, relay_secret)
-    #   threading.Thread(target=run_supernode_cluster, args=(daemon, por),
-    #                    daemon=True).start()
-    log("relay capability staged (live control-DHT advertisement is the next step)")
+    import json
+    import os
+    from pathlib import Path as _Path
+
+    from tenet.config import load_config
+    from tenet.packet.OutfoxParams import OutfoxParams
+
+    params = OutfoxParams(payload_size=2048, routing_size=16, max_hops=5)
+    pk, sk = params.kem.keygen()
+    node_id = "relay-" + os.urandom(4).hex()
+    relay_secret = os.urandom(32).hex()
+
+    # carry the live control bootstrap verbatim (raw block — to_dict() would
+    # re-validate signatures, which we leave to the runtime's own loader).
+    boot_path = _Path(tmpdir) / "control-bootstrap.json"
+    raw_pack = json.loads(_Path(pack_path).read_text(encoding="utf-8"))
+    boot_path.write_text(json.dumps(raw_pack["control_bootstrap"]), encoding="utf-8")
+
+    daemon_doc = {
+        "version": "tenet.config.2026-06",
+        "default_node_id": node_id,
+        "daemons": {
+            node_id: {
+                "role": "relay",
+                "node_id": node_id,
+                "kem_pk_hex": pk.hex(),
+                "kem_sk_hex": sk.hex(),
+                "transport": {"kind": "udp", "host": "0.0.0.0", "port": internal_port},
+                "packet": {"payload_size": 2048, "routing_size": 16, "max_hops": 5},
+                "supernode": {
+                    "enabled": True,
+                    "public_ip": public_ip,
+                    "relay_secret_hex": relay_secret,
+                    "advertise_relay": True,
+                    "accept_inbound_mix": True,
+                },
+                "peer_address": {
+                    "enabled": True,
+                    "heartbeat_interval_seconds": 120,
+                    "registration_ttl_seconds": 86400,
+                },
+                "control": {"bootstrap_path": str(boot_path)},
+            }
+        },
+    }
+    cfg_path = _Path(tmpdir) / "relay-daemon.json"
+    cfg_path.write_text(json.dumps(daemon_doc), encoding="utf-8")
+    por = load_config(str(cfg_path))
+    return por.daemon(node_id), por, node_id
+
+
+def _promote_to_relay(pack, pack_path, verdict: dict, internal_port: int, log) -> None:
+    """A directly-reachable client opts into the relay capability and actually
+    runs the supernode: advertises ``reachability_relay`` into the control plane
+    and forwards opaque traffic for NATed clients (a dumb NAT forwarder)."""
+    import tempfile
+
+    endpoint = verdict.get("endpoint") or ""
+    public_ip = endpoint.split(":")[0] if endpoint else "0.0.0.0"
+    log(f"directly reachable at {endpoint} via {verdict.get('method')} → starting relay")
+    tmpdir = tempfile.mkdtemp(prefix="tenet-relay-")
+    try:
+        daemon, por, node_id = _build_supernode_daemon(
+            pack, pack_path, internal_port=internal_port, public_ip=public_ip, tmpdir=tmpdir
+        )
+    except Exception as exc:
+        log(f"relay not started (config/bootstrap unavailable): {exc}")
+        return
+
+    from tenet.edges.cli.supernode import run_supernode_cluster
+
+    def _serve() -> None:
+        try:
+            run_supernode_cluster(daemon, por)
+        except Exception as exc:  # pragma: no cover - runtime guard
+            log(f"relay runtime stopped: {exc}")
+
+    threading.Thread(target=_serve, daemon=True, name="tenet-relay").start()
+    log(f"relaying as {node_id} on udp/{internal_port}, advertising {public_ip} for NATed clients")
 
 
 def _ask_once(pack, prompt: str, *, timeout: float = 120.0) -> dict:
@@ -115,7 +195,21 @@ def _ask_once(pack, prompt: str, *, timeout: float = 120.0) -> dict:
     )
 
 
+def _peek_matcher_host(pack_path: Path) -> str | None:
+    """Best-effort matcher host for the header, even if full validation fails."""
+    try:
+        import json
+        raw = json.loads(pack_path.read_text(encoding="utf-8"))
+        url = str((raw.get("matcher") or {}).get("url", "")).strip()
+        return (urlparse(url).hostname or url) if url else None
+    except Exception:
+        return None
+
+
 def _run_query(pack, prompt: str, timeout: float) -> int:
+    if pack is None:
+        print(_c(_GRY, "  offline: matcher pins unverified — cannot route (need a valid join-pack)"))
+        return 1
     try:
         result = _ask_once(pack, prompt, timeout=timeout)
     except Exception as exc:  # pragma: no cover - network/runtime guard
@@ -141,30 +235,40 @@ def run_default_client(
     from tenet.edges.cli.join_pack import JoinPack, resolve_join_pack_path
 
     pack_path = resolve_join_pack_path(join_pack_path)
-    if not pack_path.is_file():
-        print(
-            f"tenet: no join-pack at {pack_path}.\n"
-            "      Place config/join-pack.json (or pass --join-pack PATH) to connect.",
-            file=sys.stderr,
-        )
-        return 2
-    try:
-        pack = JoinPack.load(pack_path)
-    except Exception as exc:
-        print(f"tenet: could not load join-pack: {exc}", file=sys.stderr)
-        return 2
+    pack = None
+    matcher_host = "unconfigured"
+    warn = None
+    if pack_path.is_file():
+        matcher_host = _peek_matcher_host(pack_path) or matcher_host
+        try:
+            pack = JoinPack.load(pack_path)
+            matcher_host = urlparse(pack.matcher_url()).hostname or matcher_host
+        except Exception as exc:
+            warn = f"join-pack pins unverified ({exc})"
+    else:
+        warn = f"no join-pack at {pack_path}"
 
-    host = urlparse(pack.matcher_url()).hostname or pack.matcher_url()
-    print(_c(_RED + _B, "  ▟▛ tenet") + "  " + _c(_GRY, f"connected · matcher {host}"))
+    print(_c(_RED + _B, "  ▟▛ tenet") + "  "
+          + _c(_GRY, f"{'connected · ' if pack else ''}matcher {matcher_host}"))
+    if warn:
+        print(_c(_GRY, f"  ! {warn} → diagnostic mode (reachability runs, queries disabled)"))
 
     # Reachability + relay promotion run in the background so the prompt is instant.
+    relay_port = int(os.environ.get("TENET_RELAY_PORT", "0") or 0) or _reserve_udp_port()
+
     def _probe() -> None:
-        port = int(os.environ.get("TENET_RELAY_PORT", "0") or 0)
-        v = detect_reachability(port)
+        forced = os.environ.get("TENET_FORCE_REACHABLE")  # "ip:port" to exercise relay behind NAT
+        if forced:
+            v = {"reachable": True, "endpoint": forced, "method": "forced", "detail": "forced"}
+        else:
+            v = detect_reachability(relay_port)
         if v["reachable"]:
             print(_c(_GRN, f"  ◆ directly reachable: {v['endpoint']} ({v['method']})"))
-            if enable_relay:
-                _promote_to_relay(pack, v, lambda m: print(_c(_GRY, f"  relay · {m}")))
+            if pack is None:
+                print(_c(_GRY, "  relay · need a verified join-pack to advertise into the control plane"))
+            elif enable_relay:
+                _promote_to_relay(pack, pack_path, v, relay_port,
+                                  lambda m: print(_c(_GRY, f"  relay · {m}")))
             else:
                 print(_c(_GRY, "  relay · auto-promotion disabled (--no-relay)"))
         else:
