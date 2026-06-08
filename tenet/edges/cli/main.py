@@ -30,7 +30,20 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tenet",
         description="tenet — one binary for client, relay, expert, and directory service.",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=False)
+
+    client = sub.add_parser(
+        "client",
+        help="Connect to the bootstrap matcher and ask (default when run with no command).",
+    )
+    client.add_argument("--join-pack", default=str(resolve_join_pack_path()))
+    client.add_argument("--prompt", help="One-shot question (otherwise an interactive prompt).")
+    client.add_argument(
+        "--no-relay",
+        action="store_true",
+        help="Do not auto-promote to relay even if this machine is directly reachable.",
+    )
+    client.add_argument("--timeout", type=float, default=120.0)
 
     send = sub.add_parser("send", help="Run one client request (prepare + send envelope).")
     send.add_argument("--config", required=True, help="Cluster JSON config path")
@@ -200,6 +213,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def dispatch(args: argparse.Namespace) -> int:
+    if getattr(args, "command", None) in (None, "client"):
+        from tenet.edges.cli.run_client import run_default_client
+
+        return run_default_client(
+            getattr(args, "join_pack", None),
+            prompt=getattr(args, "prompt", None),
+            enable_relay=not getattr(args, "no_relay", False),
+            timeout=getattr(args, "timeout", 120.0),
+        )
+
     if args.command == "send":
         from tenet.edges.cli.client import run_send
 
