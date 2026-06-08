@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: build-binaries-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -45,8 +45,6 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
-          - os: macos-13   # Intel (x86_64) for broader Mac demo compatibility
-            target: macos-x86_64
           - os: macos-latest
             target: macos-arm64
           - os: windows-latest
@@ -97,7 +95,7 @@ jobs:
 
   release:
     name: github-release
-    needs: [build, android]
+    needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -109,13 +107,23 @@ jobs:
           path: dist
           pattern: por-*
           merge-multiple: true
+      - name: Select release binaries
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+          for f in dist/tenet-linux-x86_64 dist/tenet-macos-arm64 dist/tenet-windows-x86_64.exe; do
+            if [[ -f "$f" ]]; then
+              cp "$f" release/
+            fi
+          done
+          ls -la release/
       - name: Checksums
         run: |
-          cd dist
+          cd release
           find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           cat SHA256SUMS
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/**
+          files: release/**
           generate_release_notes: true
