@@ -21,9 +21,11 @@ def run_serve(
     timeout: float = 120.0,
     offline: bool = False,
 ) -> int:
-    from tenet.edges.cli.join_pack import JoinPack
+    pack = None
+    if not offline:
+        from tenet.edges.cli.join_pack import JoinPack
 
-    pack = None if offline else JoinPack.load(join_pack_path)
+        pack = JoinPack.load(join_pack_path)
     lock = threading.Lock()
     stats = {
         "request_count": 0,

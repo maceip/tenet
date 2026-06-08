@@ -19,7 +19,9 @@ if [[ -z "$TAG" ]]; then
 fi
 
 mkdir -p "$DEST"
-for name in tenet-macos-arm64 tenet-linux-x86_64 tenet-windows-x86_64.exe; do
+for name in \
+  tenet-macos-arm64 tenet-linux-x86_64 tenet-windows-x86_64.exe \
+  tenet-web-macos-arm64 tenet-web-linux-x86_64 tenet-web-windows-x86_64.exe; do
   url="$BASE/download/$TAG/$name"
   echo "[sync] $name <- $url"
   curl -fsSL -o "$DEST/$name" "$url"

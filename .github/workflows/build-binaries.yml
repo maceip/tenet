@@ -63,6 +63,34 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  build-web:
+    name: web-${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-arm64
+          - os: windows-latest
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build tenet-web (offline demo bridge, no mixnet)
+        run: python scripts/build_web_demo.py --name tenet-web-${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenet-web-${{ matrix.target }}
+          path: dist/tenet-web-*
+          if-no-files-found: error
+
   android:
     # Android target = full, functional client on the device today, as an
     # aarch64-Linux binary that runs under Termux (Android's Linux userspace).
@@ -95,7 +123,7 @@ jobs:
 
   release:
     name: github-release
-    needs: build
+    needs: [build, build-web]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -107,11 +135,17 @@ jobs:
           path: dist
           pattern: por-*
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: tenet-web-*
+          merge-multiple: true
       - name: Select release binaries
         run: |
           mkdir -p release
           shopt -s nullglob
-          for f in dist/tenet-linux-x86_64 dist/tenet-macos-arm64 dist/tenet-windows-x86_64.exe; do
+          for f in dist/tenet-linux-x86_64 dist/tenet-macos-arm64 dist/tenet-windows-x86_64.exe \
+                   dist/tenet-web-linux-x86_64 dist/tenet-web-macos-arm64 dist/tenet-web-windows-x86_64.exe; do
             if [[ -f "$f" ]]; then
               cp "$f" release/
             fi
