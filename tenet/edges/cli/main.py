@@ -209,6 +209,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print terminal layout/3D rendering assessment and exit.",
     )
 
+    serve = sub.add_parser(
+        "serve",
+        help="Local HTTP/SSE bridge for the website xterm demo (CORS-enabled).",
+    )
+    serve.add_argument(
+        "--join-pack",
+        default=str(resolve_join_pack_path()),
+        help="tenet join-pack JSON (defaults to config/join-pack.json).",
+    )
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8766)
+    serve.add_argument("--path", default="/v1/expert")
+    serve.add_argument("--status-path", default="/v1/status")
+    serve.add_argument("--timeout", type=float, default=120.0)
+
     return parser
 
 
@@ -266,6 +281,18 @@ def dispatch(args: argparse.Namespace) -> int:
 
     if args.command == "status":
         return _run_status_command(args)
+
+    if args.command == "serve":
+        from tenet.edges.cli.serve import run_serve
+
+        return run_serve(
+            join_pack_path=args.join_pack,
+            host=args.host,
+            port=args.port,
+            path=args.path,
+            status_path=args.status_path,
+            timeout=args.timeout,
+        )
 
     if args.command == "sponsor":
         from tenet.vouchers import issue_voucher_batch, save_voucher
@@ -389,6 +416,9 @@ def _run_ask_command(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             mailbox_datagram_delivery_enabled=True if args.via_mailbox else None,
             control_service=pack.to_control_service(),
+            match_gossip_salt=pack.query_epoch_salt,
+            default_pool=pack.default_pool,
+            dataset_commitment=pack.dataset_commitment,
         )
     display.finish(result)
     if args.json:

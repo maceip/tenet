@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Sequence
 from uuid import uuid4
 
+from tenet.edges.cli.http_cors import handle_cors_preflight, send_cors_headers
 from tenet.experts.client import ClientRunResult, run_client_once
 from tenet.config import ClusterConfig, DaemonConfig, LoggingConfig, PorConfig
 from tenet.experts.directory import load_public_snapshot_directory
@@ -383,6 +384,9 @@ def make_client_http_handler(
     class ClientHttpHandler(BaseHTTPRequestHandler):
         server_version = "tenet-client-http/0.1"
 
+        def do_OPTIONS(self) -> None:
+            handle_cors_preflight(self)
+
         def do_GET(self) -> None:
             if self.path == "/healthz":
                 self._send_json(_health_payload(daemon, session))
@@ -495,6 +499,7 @@ def make_client_http_handler(
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
             self.send_header("X-Accel-Buffering", "no")
+            send_cors_headers(self)
             self.end_headers()
 
         def _write_sse(self, event: str, data: dict[str, object]) -> None:
@@ -506,6 +511,7 @@ def make_client_http_handler(
             self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
+            send_cors_headers(self)
             self.end_headers()
             self.wfile.write(data)
 
