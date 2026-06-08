@@ -212,6 +212,17 @@ class WireNodeRuntime:
     def serve_forever(self) -> int:
         self.install_signal_handlers()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Best-effort socket tuning: larger UDP buffers absorb relay bursts;
+        # the kernel clamps to its max if these exceed it.
+        for opt, val in (
+            (socket.SO_REUSEADDR, 1),
+            (socket.SO_RCVBUF, 1 << 22),  # 4 MiB
+            (socket.SO_SNDBUF, 1 << 22),
+        ):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, opt, val)
+            except OSError:
+                pass
         sock.bind((self.identity.host, self.identity.port))
         self._log(
             "started",

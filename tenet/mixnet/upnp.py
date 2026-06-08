@@ -69,22 +69,33 @@ def try_port_mapping(
     if external_port == 0:
         external_port = internal_port
 
-    result = _try_upnp(internal_port, external_port,
-                       protocol=protocol, lease_seconds=lease_seconds,
-                       description=description)
-    if result.success:
-        return result
+    # Probe UPnP and NAT-PMP CONCURRENTLY and take the first success — the two
+    # are independent and each blocks on its own timeout (SSDP 2s, NAT-PMP 1s),
+    # so running them in parallel halves worst-case reachability-detection time.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    upnp_error = result.error
-
-    result = _try_natpmp(internal_port, external_port,
-                         protocol=protocol, lease_seconds=lease_seconds)
-    if result.success:
-        return result
+    errors: dict[str, str | None] = {}
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="tenet-portmap") as ex:
+        futures = {
+            ex.submit(_try_upnp, internal_port, external_port,
+                      protocol=protocol, lease_seconds=lease_seconds,
+                      description=description): "UPnP",
+            ex.submit(_try_natpmp, internal_port, external_port,
+                      protocol=protocol, lease_seconds=lease_seconds): "NAT-PMP",
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:  # pragma: no cover - defensive
+                result = MappingResult(success=False, error=str(exc))
+            if result.success:
+                return result
+            errors[name] = result.error
 
     return MappingResult(
         success=False,
-        error=f"UPnP: {upnp_error}; NAT-PMP: {result.error}",
+        error=f"UPnP: {errors.get('UPnP')}; NAT-PMP: {errors.get('NAT-PMP')}",
     )
 
 
