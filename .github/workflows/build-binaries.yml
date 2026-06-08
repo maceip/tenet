@@ -122,6 +122,25 @@ jobs:
           cd release
           find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           cat SHA256SUMS
+      - name: Sign trust-update bundle
+        # Publish half of the trust-update rail: sign software_identity +
+        # trust_update(approved_code_hashes) so clients can verify their own
+        # build (tenet/trust_gate.py). No secret -> skipped (binaries still ship).
+        env:
+          TENET_JOIN_PACK_SIGNING_KEY_HEX: ${{ secrets.TENET_JOIN_PACK_SIGNING_KEY_HEX }}
+        run: |
+          if [ -z "${TENET_JOIN_PACK_SIGNING_KEY_HEX}" ]; then
+            echo "::warning::TENET_JOIN_PACK_SIGNING_KEY_HEX not set — skipping trust-update signing"
+            exit 0
+          fi
+          python -m pip install -q -e .
+          python scripts/sign_release_trust_update.py \
+            --shasums release/SHA256SUMS \
+            --version "${GITHUB_REF_NAME}" \
+            --build-ref "${GITHUB_REF_NAME} · ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --base-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest/download" \
+            --out release/trust-update.json
+          echo "signed release/trust-update.json"
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:

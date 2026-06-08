@@ -248,6 +248,7 @@ class _Status:
         self.conn = _OFF      # green=verified · yellow=degraded · red=down
         self.relay = _OFF     # hidden until promoted; yellow=promoting · green=relaying · red=failed
         self.expert = _OFF    # hidden until serving as an expert
+        self.build = None     # None | up_to_date | update_available | unknown (trust gate)
 
 
 def _light(label: str, state: str) -> str:
@@ -268,7 +269,10 @@ def _render_header(status: "_Status") -> str:
         cells.append(_light("relay", status.relay))
     if status.expert != _OFF:
         cells.append(_light("expert", status.expert))
-    return "  " + "    ".join(c for c in cells if c)
+    line = "  " + "    ".join(c for c in cells if c)
+    if status.build == "update_available":
+        line += "    " + _c(_LAMP_COLOR["yellow"], "⟳ update available")
+    return line
 
 
 def run_default_client(
@@ -290,7 +294,8 @@ def run_default_client(
     pack = None
     warn = None
     status = _Status()
-    detail = {"matcher": "unconfigured", "relay": "probing…", "expert": "not serving"}
+    detail = {"matcher": "unconfigured", "relay": "probing…", "expert": "not serving",
+              "build": "checking…"}
     if pack_path.is_file():
         detail["matcher"] = _peek_matcher_host(pack_path) or detail["matcher"]
         try:
@@ -328,7 +333,30 @@ def run_default_client(
         status.relay = _S_GRN if serving else _S_RED
         detail["relay"] = info
 
+    def _trust_check() -> None:
+        # Consume half of the trust-update rail: is our binary an approved build?
+        # Best-effort + silent (never races the prompt); soft by default.
+        from tenet import _buildinfo
+        if pack is None:
+            detail["build"] = "join-pack unverified — trust gate skipped"
+            status.build = "unknown"
+            return
+        try:
+            from tenet.trust_gate import load_trust_state
+            ts = load_trust_state(pack)
+        except Exception as exc:  # pragma: no cover - defensive
+            detail["build"] = f"trust gate error: {exc}"
+            status.build = "unknown"
+            return
+        status.build = ts.state
+        ver = f" · latest {ts.latest_version}" if ts.latest_version else ""
+        detail["build"] = (f"{_buildinfo.VERSION} ({_buildinfo.BUILD_REF}) — "
+                           f"{ts.state}: {ts.detail}{ver}")
+        if ts.required and not ts.ok:
+            detail["build"] = "REQUIRED update — " + detail["build"]
+
     threading.Thread(target=_probe, daemon=True, name="tenet-probe").start()
+    threading.Thread(target=_trust_check, daemon=True, name="tenet-trust").start()
 
     print(_render_header(status))
     if warn:
@@ -359,6 +387,7 @@ def run_default_client(
             print(_c(_GRY, f"    matcher  {detail['matcher']}"))
             print(_c(_GRY, f"    relay    {detail['relay']}"))
             print(_c(_GRY, f"    expert   {detail['expert']}"))
+            print(_c(_GRY, f"    build    {detail['build']}"))
             continue
         rc = _run_query(pack, line, timeout)
         print(_render_header(status))
