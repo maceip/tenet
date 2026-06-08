@@ -65,7 +65,7 @@ tmux set-option -t "$SESSION" pane-active-border-style "fg=colour51 bold"
 # the whole session (both panes) — no orphaned tail -f.
 tmux select-pane -t "$SESSION":0.0 -T "ASKER  ·  your agent"
 tmux send-keys -t "$SESSION":0.0 \
-  "clear; TENET_STEP=1 TENET_VERBOSE=1 TENET_REAL_PAY='${TENET_REAL_PAY:-}' TENET_PAY_TO='${TENET_PAY_TO:-}' TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2m── demo complete · Ctrl-b then & to exit ──\033[0m\n'; while :; do sleep 86400; done" C-m
+  "clear; TENET_STEP=1 TENET_VERBOSE=1 TENET_EXPERT_LOG='$LOG' '$PY' '$ROOT/scripts/demo/present.py' $*; printf '\n  \033[2m── demo complete · Ctrl-b then & to exit ──\033[0m\n'; while :; do sleep 86400; done" C-m
 
 # RIGHT pane (1) = EXPERT
 tmux split-window -h -t "$SESSION":0
