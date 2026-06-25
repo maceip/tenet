@@ -1,8 +1,5 @@
 # tenet
 
-> **Built on a confidential-compute platform** — runs inside a cloud TEE via [attested-workload](https://github.com/maceip/attested-workload) with portable receipts in [unified-quote](https://github.com/maceip/unified-quote) format. Platform: [cvm-agent](https://github.com/maceip/cvm-agent) · [attestation-service](https://github.com/maceip/attestation-service) · [unified-quote](https://github.com/maceip/unified-quote) · [attested-workload](https://github.com/maceip/attested-workload).
-
-
 > *An invisible college you reach through hardware you're not allowed to look
 > inside. Knowledge moves; people disappear.*
 
